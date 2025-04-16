@@ -1,0 +1,41 @@
+from django.urls import path
+
+from .views import index_page, get_user, add_user, get_topics, get_topic, add_user_contact, get_test, get_tariffs,\
+    get_tariff, add_payment, get_available_topic, get_topic_lessons, get_available_lesson, get_lessons, \
+    get_lesson_video, get_video_info, get_videos, get_video_question, add_start_content, add_content_after_video,\
+    get_lesson_tests, get_tests, add_content_after_test, get_admin_info, get_lesson_practices, get_practice_info,\
+    get_practices, add_content_after_practice
+
+app_name = "app_bot"
+
+urlpatterns = [
+    path('', index_page, name="index_page"),
+    path('tg_user/<int:telegram_id>', get_user),
+    path('user/add/', add_user),
+    path('topics/', get_topics),
+    path('topic/<topic_title>', get_topic),
+    path('contact/add/', add_user_contact),
+    path('start_test/<test_title>', get_test),
+    path('tariffs/', get_tariffs),
+    path('tariff/<tariff_title>', get_tariff),
+    path('payment/add/', add_payment, name='add_payment'),
+    path('available_topics/<telegram_id>', get_available_topic),
+    path('topic_lessons/<topic_title>', get_topic_lessons),
+    path('lesson/<str:topic_title>/<str:lesson_title>', get_available_lesson),
+    path('lessons/', get_lessons),
+    path('lesson_video/<topic_title>/<lesson_title>', get_lesson_video),
+    path('video/<lesson_title>/<video_title>', get_video_info),
+    path('videos/', get_videos),
+    path('video_question/<int:video_id>', get_video_question),
+    path('start_content/add/', add_start_content),
+    path('next_content/add/', add_content_after_video),
+    path('lesson_tests/<topic_title>/<lesson_title>', get_lesson_tests),
+    path('tests/', get_tests),
+    path('next_content_test/add/', add_content_after_test),
+    path('get_tg_admin/', get_admin_info),
+    path('lesson_practices/<topic_title>/<lesson_title>', get_lesson_practices),
+    path('practice/<lesson_title>/<practice_title>', get_practice_info),
+    path('practices/', get_practices),
+    path('next_content_practice/add/', add_content_after_practice),
+
+]
