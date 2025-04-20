@@ -12,8 +12,9 @@ LANGUAGE_CODE = 'en-us'
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = env('SECRET_KEY', 'replace_me')
+POSTGRES_URL = env('POSTGRES_URL')
 DEBUG = env.bool('DEBUG', True)
-ALLOWED_HOSTS = env.list('ALLOWED_HOSTS', ['127.0.0.1', 'localhost'])
+ALLOWED_HOSTS = env.list('ALLOWED_HOSTS', ['127.0.0.1', 'localhost', 'get_course_bot'])
 INTERNAL_IPS = ["127.0.0.1", ]
 TIME_ZONE = 'Europe/Moscow'
 USE_I18N = True
@@ -75,9 +76,11 @@ WSGI_APPLICATION = 'it_tg_bot.wsgi.application'
 #     }
 # }
 
+
 DATABASES = {
     'default': dj_database_url.config(
-        default="postgres://max:Anykey@localhost/it_td_bot",
+        default=POSTGRES_URL,
+        conn_max_age=600,
     )
 }
 
@@ -109,6 +112,7 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 STATIC_URL = '/static/'
 STATICFILES_DIRS = [os.path.join(BASE_DIR, 'static')]
-STATIC_ROOT = ''
+STATIC_ROOT = os.path.join(BASE_DIR, 'collected_static')
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 MEDIA_URL = '/media/'
+BASE_MEDIA_URL = env('BASE_MEDIA_URL', 'http://127.0.0.1:8000')

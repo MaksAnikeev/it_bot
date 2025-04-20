@@ -1,20 +1,25 @@
+import html
+import logging
+import re
+
 from django.core.exceptions import ObjectDoesNotExist
-from django.shortcuts import render, get_object_or_404
-from .models import Lesson, Video, TelegramUser, UserContact, Topic, Test, Tariff, UserAvailability, Question,\
-    StartUserAvailability, Practice
+from django.shortcuts import get_object_or_404, render
 from django.utils.html import strip_tags
-from rest_framework.response import Response
+from django.views.decorators.csrf import csrf_exempt
 from rest_framework import status
 from rest_framework.decorators import api_view
-from django.views.decorators.csrf import csrf_exempt
-import html
-import re
+from rest_framework.response import Response
+
 from .forms import TopicForm
-from .serializers import TelegramUserSerializer, TopicSerializer, UserContactSerializer, TestSerializer,\
-    TariffSerializer, PaymentSerializer, UserAvailabilitySerializer, LessonSerializer, VideoSerializer,\
-    QuestionSerializer, PracticeSerializer
-import logging
-from datetime import datetime
+from .models import (Lesson, Practice, Question, StartUserAvailability, Tariff,
+                     TelegramUser, Test, Topic, UserAvailability, UserContact,
+                     Video)
+from .serializers import (LessonSerializer, PaymentSerializer,
+                          PracticeSerializer, QuestionSerializer,
+                          TariffSerializer, TelegramUserSerializer,
+                          TestSerializer, TopicSerializer,
+                          UserAvailabilitySerializer, UserContactSerializer,
+                          VideoSerializer)
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)

@@ -1,7 +1,10 @@
 from bs4 import BeautifulSoup
 from rest_framework import serializers
-from .models import TelegramUser, UserContact, Topic, Answer, Question, Test, Tariff, Payment, UserAvailability,\
-    Lesson, Video, VideoSummary, Practice
+from django.conf import settings
+
+from .models import (Answer, Lesson, Payment, Practice, Question, Tariff,
+                     TelegramUser, Test, Topic, UserAvailability, UserContact,
+                     Video, VideoSummary)
 
 
 def clean_html(html_text):
@@ -68,8 +71,8 @@ class TopicSerializer(serializers.ModelSerializer):
             request = self.context.get('request')
             if request is not None:
                 return request.build_absolute_uri(obj.picture.url)
-            # Запасной вариант для локальной разработки
-            return f"http://127.0.0.1:8000{obj.picture.url}"
+            base_url = settings.BASE_MEDIA_URL.rstrip('/')
+            return f"{base_url}{obj.picture.url}"
         return None
 
     class Meta:
@@ -102,8 +105,8 @@ class QuestionSerializer(serializers.ModelSerializer):
             request = self.context.get('request')
             if request is not None:
                 return request.build_absolute_uri(obj.picture.url)
-            # Запасной вариант для локальной разработки
-            return f"http://127.0.0.1:8000{obj.picture.url}"
+            base_url = settings.BASE_MEDIA_URL.rstrip('/')
+            return f"{base_url}{obj.picture.url}"
         return None
 
     class Meta:
@@ -136,8 +139,8 @@ class LessonSerializer(serializers.ModelSerializer):
             request = self.context.get('request')
             if request is not None:
                 return request.build_absolute_uri(obj.picture.url)
-            # Запасной вариант для локальной разработки
-            return f"http://127.0.0.1:8000{obj.picture.url}"
+            base_url = settings.BASE_MEDIA_URL.rstrip('/')
+            return f"{base_url}{obj.picture.url}"
         return None
 
     class Meta:
@@ -158,8 +161,8 @@ class VideoSummarySerializer(serializers.ModelSerializer):
             request = self.context.get('request')
             if request is not None:
                 return request.build_absolute_uri(obj.picture.url)
-            # Запасной вариант для локальной разработки
-            return f"http://127.0.0.1:8000{obj.picture.url}"
+            base_url = settings.BASE_MEDIA_URL.rstrip('/')
+            return f"{base_url}{obj.picture.url}"
         return None
 
     class Meta:
@@ -188,8 +191,8 @@ class PracticeSerializer(serializers.ModelSerializer):
             request = self.context.get('request')
             if request is not None:
                 return request.build_absolute_uri(obj.exercise.url)
-            # Запасной вариант для локальной разработки
-            return f"http://127.0.0.1:8000{obj.exercise.url}"
+            base_url = settings.BASE_MEDIA_URL.rstrip('/')
+            return f"{base_url}{obj.exercise.url}"
         return None
 
     class Meta:

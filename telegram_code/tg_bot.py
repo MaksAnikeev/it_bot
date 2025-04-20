@@ -1,43 +1,32 @@
-from datetime import datetime, timedelta
-import os
-from pprint import pprint
-
-import telegram
-from telegram import Update, Bot
-from telegram.ext import (CallbackQueryHandler, CommandHandler, Filters,
-                          MessageHandler, Updater, PreCheckoutQueryHandler)
-from dotenv import load_dotenv
-import random
+import json
 import logging
+import os
 import time
-from typing import Dict, Set
-
-from textwrap import dedent
+from datetime import datetime, timedelta
 from enum import Enum, auto
-from bs4 import BeautifulSoup
-from text_filters import ValidTopicFilter, ValidTariffFilter, ValidLessonFilter, ValidVideoFilter, ValidTestsFilter,\
-    ValidPracticeFilter
-from urllib.parse import unquote
+from textwrap import dedent
+from typing import Dict
+from telegram.utils.request import Request
 
 import environs
-import requests
 import phonenumbers
-
-from telegram import (InlineKeyboardButton, InlineKeyboardMarkup, Update,
-                      ReplyKeyboardMarkup, KeyboardButton, LabeledPrice, Message, Chat)
-from telegram.ext import (CallbackQueryHandler, CallbackContext,
-                          CommandHandler, ConversationHandler,
-                          MessageHandler, Filters, Updater)
-from telegram import ParseMode
-from utils import clean_html, delete_previous_messages, call_api_get, call_api_post, validate_phone_number,\
-    download_youtube_video
-import json
-
+import requests
+import telegram
+from bs4 import BeautifulSoup
 from more_itertools import chunked
+from telegram import (Bot, Chat, InlineKeyboardButton, InlineKeyboardMarkup,
+                      KeyboardButton, LabeledPrice, Message, ParseMode,
+                      ReplyKeyboardMarkup, Update)
+from telegram.ext import (CallbackContext, CallbackQueryHandler,
+                          CommandHandler, ConversationHandler, Filters,
+                          MessageHandler, PreCheckoutQueryHandler, Updater)
 
-# def log_animation(update: Update, context: CallbackContext):
-#     if update.message.animation:
-#         print("File ID:", update.message.animation.file_id)
+from text_filters import (ValidLessonFilter, ValidPracticeFilter,
+                          ValidTariffFilter, ValidTestsFilter,
+                          ValidTopicFilter, ValidVideoFilter)
+from utils import (call_api_get, call_api_post, clean_html,
+                   delete_previous_messages, download_youtube_video,
+                   validate_phone_number)
 
 class States(Enum):
     MAIN_MENU = auto()
@@ -138,7 +127,7 @@ def add_content_via_api(endpoint: str, payload: Dict, context: CallbackContext, 
     Вызывает API для добавления контента и возвращает данные о новом контенте.
 
     Args:
-        endpoint: URL API (например, 'bot/next_content/add/').
+        endpoint: URL API (например, '/bot/next_content/add/').
         payload: Данные для POST-запроса (например, {'user_id': 1, 'video_id': 2}).
         context: CallbackContext для доступа к боту.
         update: Update для отправки сообщений.
@@ -285,7 +274,7 @@ def start(update: Update, context: CallbackContext) -> States:
             "tg_name": username,
         }
         try:
-            call_api_post("bot/user/add/", payload)
+            call_api_post("/bot/user/add/", payload)
             logger.info(f"User {telegram_id} added to DB")
         except requests.RequestException as e:
             logger.error(f"Failed to add user {telegram_id}: {str(e)}")
@@ -351,25 +340,28 @@ def get_topic_info(update: Update, context: CallbackContext) -> States:
         keyboard = [["📖 Главное меню", "🗂 Темы уроков"]]
         markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
 
-        # Список для хранения новых message_id
-        message_ids = []
 
         if topic_data['picture']:
-            picture_response = requests.get(topic_data['picture'])
-            picture_response.raise_for_status()
-            photo_message = update.message.reply_photo(
-                photo=picture_response.content,
-                caption=menu_msg,
-                parse_mode=ParseMode.HTML
-            )
-            message_ids.append(photo_message.message_id)
+            logger.info(f"Fetching picture: {topic_data['picture']}")
+            try:
+                picture_response = requests.get(topic_data['picture'], timeout=10)
+                picture_response.raise_for_status()
+                photo_message = update.message.reply_photo(
+                    photo=picture_response.content,
+                    caption=menu_msg,
+                    parse_mode=ParseMode.HTML
+                )
+                context.user_data['prev_message_ids'].append(photo_message.message_id)
+            except requests.RequestException as e:
+                logger.warning(f"Failed to load picture: {e}")
+                text_message = update.message.reply_text(menu_msg, parse_mode=ParseMode.HTML)
+                context.user_data['prev_message_ids'].append(text_message.message_id)
         else:
             text_message = update.message.reply_text(menu_msg, parse_mode=ParseMode.HTML)
-            message_ids.append(text_message.message_id)
+            context.user_data['prev_message_ids'].append(text_message.message_id)
 
         menu_message = update.message.reply_text(text='Для возврата выбери тип меню', reply_markup=markup)
-        message_ids.append(menu_message.message_id)
-        context.user_data['prev_message_ids'] = message_ids
+        context.user_data['prev_message_ids'].append(menu_message.message_id)
         return States.MAIN_MENU
 
     except requests.RequestException as e:
@@ -687,7 +679,7 @@ def get_user_email(update: Update, context: CallbackContext) -> States:
 def send_contact_to_api(update: Update, context: CallbackContext, payload: dict) -> States:
     """Отправляет данные в API и обрабатывает ответ. Идет после get_user_phone_number"""
     try:
-        response = call_api_post('bot/contact/add/', payload)
+        response = call_api_post('/bot/contact/add/', payload)
         if response.ok:
             message_keyboard = [["🧑‍💻 Тест", "Оплата"], ["📖 Главное меню", "🗂 Темы уроков"]]
             markup = ReplyKeyboardMarkup(message_keyboard, resize_keyboard=True, one_time_keyboard=True)
@@ -907,9 +899,11 @@ def handle_answer(update: Update, context: CallbackContext) -> States:
     if user_answers == correct_serial_numbers:
         correct_answers += 1
         msg = "🎉 Правильно!"
-        message_id = context.bot.send_animation(
+        message_id = context.bot.send_message(
             chat_id=chat_id,
-            animation='CgACAgQAAxkBAAI1aWfw2EVW4QzkII5loCf7TSd728Y1AALTAgACeycNU_1FSmcSS9caNgQ'
+            text=msg,
+            reply_markup=None,
+            parse_mode=ParseMode.HTML
         ).message_id
     else:
         if show_right_answer:
@@ -992,7 +986,7 @@ def show_test_result(chat_id: int, context: CallbackContext, questions: list, co
                 from_user=None
             )
             fake_update = Update(update_id=0, message=fake_message)
-            next_content = add_content_via_api('bot/next_content_test/add/', payload, context, fake_update)
+            next_content = add_content_via_api('/bot/next_content_test/add/', payload, context, fake_update)
             if not next_content:
                 # Ошибка добавления контента
                 keyboard = [["📝 Доступные темы", "📖 Главное меню"]]
@@ -1255,14 +1249,14 @@ def successful_payment(update, context):
     }
     logger.info(f"Full payload for API: {full_payload}")
     try:
-        response = call_api_post('bot/payment/add/', full_payload)
+        response = call_api_post('/bot/payment/add/', full_payload)
         logger.info(f"API response: {response.status_code}, {response.text}")
         if response.ok:
             payload_content = {
                 'user': payload['u'],
                 'tariff': tariff_title,
             }
-            response_content = call_api_post('bot/start_content/add/', payload_content)
+            response_content = call_api_post('/bot/start_content/add/', payload_content)
             response_content.raise_for_status()
 
             menu_msg = 'Оплата успешно произведена, можете приступать к прохождению курса'
@@ -1355,6 +1349,7 @@ def get_available_topics_name(update: Update, context: CallbackContext) -> State
 
     availability = response.json()
     topics = availability['topics']
+    logger.info(f"Topics for keyboard: {[topic['title'] for topic in topics]}")
     context.user_data['available_lessons'] = availability['lessons']
     topics_buttons = [topic["title"] for topic in topics]
     topics_buttons.extend(["📖 Главное меню"])
@@ -1408,25 +1403,28 @@ def get_available_topic_info(update: Update, context: CallbackContext) -> States
         keyboard = list(chunked(topics_buttons, 2))
         markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
 
-        # Список для хранения новых message_id
-        message_ids = []
 
         if topic_data['picture']:
-            picture_response = requests.get(topic_data['picture'])
-            picture_response.raise_for_status()
-            photo_message = update.message.reply_photo(
-                photo=picture_response.content,
-                caption=menu_msg,
-                parse_mode=ParseMode.HTML
-            )
-            message_ids.append(photo_message.message_id)
+            logger.info(f"Fetching picture: {topic_data['picture']}")
+            try:
+                picture_response = requests.get(topic_data['picture'], timeout=10)
+                picture_response.raise_for_status()
+                photo_message = update.message.reply_photo(
+                    photo=picture_response.content,
+                    caption=menu_msg,
+                    parse_mode=ParseMode.HTML
+                )
+                context.user_data['prev_message_ids'].append(photo_message.message_id)
+            except requests.RequestException as e:
+                logger.warning(f"Failed to load picture: {e}")
+                text_message = update.message.reply_text(menu_msg, parse_mode=ParseMode.HTML)
+                context.user_data['prev_message_ids'].append(text_message.message_id)
         else:
             text_message = update.message.reply_text(menu_msg, parse_mode=ParseMode.HTML)
-            message_ids.append(text_message.message_id)
+            context.user_data['prev_message_ids'].append(text_message.message_id)
 
         menu_message = update.message.reply_text(text='Выбери доступные уроки', reply_markup=markup)
-        message_ids.append(menu_message.message_id)
-        context.user_data['prev_message_ids'] = message_ids
+        context.user_data['prev_message_ids'].append(menu_message.message_id)
         return States.AVAILABLE_LESSON
 
     except requests.RequestException as e:
@@ -1469,17 +1467,25 @@ def get_lesson_info(update: Update, context: CallbackContext) -> States:
         markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
 
         if lesson_data['picture']:
-            lesson_response = requests.get(lesson_data['picture'])
-            lesson_response.raise_for_status()
-            photo_message = update.message.reply_photo(
-                photo=lesson_response.content,
-                caption=menu_msg,
-                parse_mode=ParseMode.HTML
-            )
-            context.user_data['prev_message_ids'].append(photo_message.message_id)
+            logger.info(f"Fetching picture: {lesson_data['picture']}")
+            try:
+                lesson_response = requests.get(lesson_data['picture'])
+                lesson_response.raise_for_status()
+                photo_message = update.message.reply_photo(
+                    photo=lesson_response.content,
+                    caption=menu_msg,
+                    parse_mode=ParseMode.HTML
+                )
+                context.user_data['prev_message_ids'].append(photo_message.message_id)
+            except requests.RequestException as e:
+                logger.warning(f"Failed to load picture: {e}")
+                text_message = update.message.reply_text(menu_msg, parse_mode=ParseMode.HTML)
+                context.user_data['prev_message_ids'].append(text_message.message_id)
+
         else:
             text_message = update.message.reply_text(menu_msg, parse_mode=ParseMode.HTML)
             context.user_data['prev_message_ids'].append(text_message.message_id)
+
 
         menu_message = update.message.reply_text(text='Начинай с просмотра видео', reply_markup=markup)
         context.user_data['prev_message_ids'].append(menu_message.message_id)
@@ -1658,14 +1664,21 @@ def handle_video_question_answer(update: Update, context: CallbackContext) -> St
     correct_serial_numbers = [str(a['serial_number']) for a in correct_answers_list]
 
     if user_answer in correct_serial_numbers:
-        message_id = context.bot.send_animation(
+        msg = "🎉 Правильно!"
+        message_id = context.bot.send_message(
             chat_id=chat_id,
-            animation='CgACAgQAAxkBAAI1aWfw2EVW4QzkII5loCf7TSd728Y1AALTAgACeycNU_1FSmcSS9caNgQ'
+            text=msg,
+            reply_markup=None,
+            parse_mode=ParseMode.HTML
         ).message_id
         context.user_data['prev_message_ids'].append(message_id)
         video_id = context.user_data['video_id']
-        user_id = context.user_data.get('user_id')
-        if not user_id:
+        telegram_id = get_telegram_id(update, context)
+        response = call_api_get(f"bot/tg_user/{telegram_id}")
+        if response.ok:
+            user_data = response.json()
+            user_id = user_data["user_id"]
+        else:
             logger.error("User ID not found in context.user_data")
             send_message_bot(context, update, "Ошибка: пользователь не идентифицирован.", None, False)
             return States.MAIN_MENU
@@ -1674,7 +1687,7 @@ def handle_video_question_answer(update: Update, context: CallbackContext) -> St
             'user_id': user_id,
             'video_id': video_id,
         }
-        next_content = add_content_via_api('bot/next_content/add/', payload, context, update)
+        next_content = add_content_via_api('/bot/next_content/add/', payload, context, update)
         if not next_content:
             # Ошибка уже обработана в add_content_via_api
             return States.MAIN_MENU
@@ -1979,7 +1992,7 @@ def get_admin_approval(update: Update, context: CallbackContext):
         'practice_id': practice_id,
         'telegram_id': client_chat_id
     }
-    next_content = add_content_via_api('bot/next_content_practice/add/', payload, context, update)
+    next_content = add_content_via_api('/bot/next_content_practice/add/', payload, context, update)
     if not next_content:
         # Ошибка уже обработана в add_content_via_api
         return States.MAIN_MENU
@@ -2006,8 +2019,15 @@ if __name__ == '__main__':
 
     telegram_bot_token = env.str("TG_BOT_TOKEN")
     provider_ukassa_token = env.str("PAYMENT_UKASSA_TOKEN")
-    updater = Updater(telegram_bot_token, use_context=True)
+
+    # Настройка Request с увеличенными таймаутами
+    request = Request(connect_timeout=10, read_timeout=30)  # 10 сек на соединение, 30 сек на чтение
+    bot = Bot(token=telegram_bot_token, request=request)
+
+    # Создание Updater с настроенным ботом
+    updater = Updater(bot=bot, use_context=True)
     dispatcher = updater.dispatcher
+
     valid_topic_filter = ValidTopicFilter()
     valid_tariff_filter = ValidTariffFilter()
     valid_lesson_filter = ValidLessonFilter()
@@ -2089,10 +2109,10 @@ if __name__ == '__main__':
             ],
             States.ACCEPT_PRIVACY: [
                             MessageHandler(
-                                Filters.text('✅ Согласен'), start_user_registration
+                                Filters.regex(r'^\s*(✅\s*)?Согласен\s*$'), start_user_registration
                             ),
                             MessageHandler(
-                                Filters.text('❌ Не согласен'), cancel_agreement
+                                Filters.regex(r'^\s*(❌\s*)?Не согласен\s*$'), cancel_agreement
                             ),
                             MessageHandler(
                                 Filters.text('❌ Нет'), start
@@ -2337,9 +2357,24 @@ if __name__ == '__main__':
         allow_reentry=True,
         name='bot_conversation',
         per_message=False,
-        # fallbacks = [MessageHandler(Filters.animation, log_animation)]
     )
 
+
+    # Добавление обработчика ошибок
+    def error_handler(update: Update, context: CallbackContext):
+        """Обработчик ошибок."""
+        logger.error(f"Update {update} caused error {context.error}")
+        if isinstance(context.error, telegram.error.TimedOut):
+            update.message.reply_text(
+                "⏳ Произошла ошибка из-за медленного интернета. Пожалуйста, попробуйте снова."
+            )
+        else:
+            update.message.reply_text(
+                "❌ Произошла ошибка. Пожалуйста, попробуйте снова или свяжитесь с поддержкой."
+            )
+
+
+    dispatcher.add_error_handler(error_handler)
     dispatcher.add_handler(conv_handler)
     start_handler = CommandHandler('start', start)
     dispatcher.add_handler(start_handler)

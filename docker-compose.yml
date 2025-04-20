@@ -1,0 +1,96 @@
+version: '3.8'
+
+services:
+  pgdb:
+    image: postgres:15
+    env_file:
+      - .env
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    volumes:
+      - data_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    container_name: pgdb
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: >
+      /bin/sh -c "python manage.py makemigrations --no-input &&
+                   python manage.py migrate --no-input &&
+                   python manage.py collectstatic --no-input &&
+                   python manage.py load_fixture /app/db_start.json && # Обрати внимание это кастомный обработчик, который очищает фикстуру в контейнере для того чтобы загрузить БД с файла db_start.json. Сам обработчик находится в app_bot/management/commands
+                   python manage.py create_superuser && # это тоже кастомный обработчик для создания суперюзера с паролем из энв. Находится в app_bot/management/commands
+                   gunicorn -b 0.0.0.0:8080 it_tg_bot.wsgi --reload"
+    env_file:
+      - .env
+    environment:
+      - SECRET_KEY=${SECRET_KEY}
+      - DJANGO_SUPERUSER_USERNAME=${DJANGO_SUPERUSER_USERNAME}
+      - DJANGO_SUPERUSER_PASSWORD=${DJANGO_SUPERUSER_PASSWORD}
+      - DJANGO_SUPERUSER_EMAIL=${DJANGO_SUPERUSER_EMAIL}
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS}
+      - DEBUG=${DEBUG}
+      - POSTGRES_URL=postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@pgdb:5432/${POSTGRES_DB}
+      - TG_BOT_TOKEN=${TG_BOT_TOKEN}
+      - PAYMENT_UKASSA_TOKEN=${PAYMENT_UKASSA_TOKEN}
+      - BASE_MEDIA_URL=${BASE_MEDIA_URL}
+    volumes:
+      - .:/app
+      - collected_static:/app/collected_static
+      - /mnt/d/Программирование/Devman/it_bot/media:/app/media  # Монтируем локальную папку
+    depends_on:
+      pgdb:
+        condition: service_healthy
+    ports:
+      - "8081:8080"
+    container_name: django_backend
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./hosts/get_course_bot_nginx.conf:/etc/nginx/conf.d/default.conf
+      - collected_static:/static_bot/collected_static
+      - /mnt/d/Программирование/Devman/it_bot/media:/app/media  # Монтируем локальную папку
+    depends_on:
+      backend:
+        condition: service_started  # Изменено с service_healthy на service_started
+    container_name: nginx
+    restart: unless-stopped
+
+  bot:
+    build: .
+    command: /bin/sh -c "sleep 30 && python /app/telegram_code/tg_bot.py"
+    env_file:
+      - .env
+    environment:
+      - BASE_MEDIA_URL=${BASE_MEDIA_URL}
+      - PAYMENT_UKASSA_TOKEN=${PAYMENT_UKASSA_TOKEN}
+    volumes:
+      - .:/app
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+    depends_on:
+      nginx:
+        condition: service_started
+      backend:
+        condition: service_started
+    container_name: it_bot-bot
+    restart: unless-stopped
+
+volumes:
+  data_db:
+  collected_static:
+#  media:

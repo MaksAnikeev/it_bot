@@ -1,12 +1,20 @@
+from django.http import HttpResponse
 from django.urls import path
 
-from .views import index_page, get_user, add_user, get_topics, get_topic, add_user_contact, get_test, get_tariffs,\
-    get_tariff, add_payment, get_available_topic, get_topic_lessons, get_available_lesson, get_lessons, \
-    get_lesson_video, get_video_info, get_videos, get_video_question, add_start_content, add_content_after_video,\
-    get_lesson_tests, get_tests, add_content_after_test, get_admin_info, get_lesson_practices, get_practice_info,\
-    get_practices, add_content_after_practice
+from .views import (add_content_after_practice, add_content_after_test,
+                    add_content_after_video, add_payment, add_start_content,
+                    add_user, add_user_contact, get_admin_info,
+                    get_available_lesson, get_available_topic,
+                    get_lesson_practices, get_lesson_tests, get_lesson_video,
+                    get_lessons, get_practice_info, get_practices, get_tariff,
+                    get_tariffs, get_test, get_tests, get_topic,
+                    get_topic_lessons, get_topics, get_user, get_video_info,
+                    get_video_question, get_videos, index_page)
 
 app_name = "app_bot"
+
+def health_check(request):
+    return HttpResponse("OK", status=200)
 
 urlpatterns = [
     path('', index_page, name="index_page"),
@@ -37,5 +45,6 @@ urlpatterns = [
     path('practice/<lesson_title>/<practice_title>', get_practice_info),
     path('practices/', get_practices),
     path('next_content_practice/add/', add_content_after_practice),
+    path('health/', health_check, name='health_check'),
 
 ]

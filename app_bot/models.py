@@ -1,8 +1,8 @@
-from django.db import models
 from django.contrib.postgres.fields import ArrayField
-from tinymce.models import HTMLField
 from django.core.exceptions import ValidationError
+from django.db import models
 from phonenumber_field.modelfields import PhoneNumberField
+from tinymce.models import HTMLField
 
 
 # Пользователи

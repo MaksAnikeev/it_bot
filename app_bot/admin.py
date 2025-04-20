@@ -1,11 +1,11 @@
-from django.contrib import admin
-from django.utils.html import format_html, mark_safe
-from django.utils.html import strip_tags
 import html
 
-from .models import TelegramUser, UserContact, Payment, UserAvailability, Topic, Lesson, Video, VideoSummary,\
-    Test, Question, Answer, Practice, Tariff, StartUserAvailability
+from django.contrib import admin
+from django.utils.html import format_html, mark_safe, strip_tags
 
+from .models import (Answer, Lesson, Payment, Practice, Question,
+                     StartUserAvailability, Tariff, TelegramUser, Test, Topic,
+                     UserAvailability, UserContact, Video, VideoSummary)
 
 
 class UserContactInline(admin.TabularInline):
