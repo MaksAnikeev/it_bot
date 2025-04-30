@@ -521,7 +521,7 @@ def start_registration(update: Update, context: CallbackContext) -> States:
                                  one_time_keyboard=True)
 
     current_dir = os.path.dirname(__file__)
-    file_path = os.path.abspath(os.path.join(current_dir, '..', 'documents', 'privacy_policy_statement.pdf'))
+    file_path = os.path.abspath(os.path.join(current_dir, '..', 'media', 'documents', 'privacy_policy_statement.pdf'))
 
     with open(file_path, 'rb') as image:
         user_agreement_pdf = image.read()
