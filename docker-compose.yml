@@ -46,7 +46,7 @@ services:
     volumes:
       - .:/app
       - collected_static:/app/collected_static
-      - media_volume:/app/media
+      - /opt/getcourse/media:/app/media  # Монтируем папку с сервера
 #      - /mnt/d/Программирование/Devman/it_bot/media:/app/media  # Монтируем локальную папку
     depends_on:
       pgdb:
@@ -63,7 +63,7 @@ services:
     volumes:
       - ./hosts/get_course_bot_nginx.conf:/etc/nginx/conf.d/default.conf
       - collected_static:/static_bot/collected_static
-      - media_volume:/app/media
+      - /opt/getcourse/media:/app/media  # Монтируем папку с сервера
 #      - /mnt/d/Программирование/Devman/it_bot/media:/app/media  # Монтируем локальную папку
     depends_on:
       backend:
