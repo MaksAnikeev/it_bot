@@ -1369,6 +1369,8 @@ def get_available_topics_name(update: Update, context: CallbackContext) -> State
 def get_available_topic_info(update: Update, context: CallbackContext) -> States:
     """Получает информацию о выбранной теме и список уроков в ней"""
     topic_title = update.message.text
+    if topic_title == '🔙 Назад':
+        topic_title = context.user_data["topic_title"]
     chat_id = update.message.chat_id
 
     # Удаляем сообщение пользователя с выбором
@@ -1436,6 +1438,8 @@ def get_available_topic_info(update: Update, context: CallbackContext) -> States
 def get_lesson_info(update: Update, context: CallbackContext) -> States:
     """Получает информацию о выбранном уроке"""
     lesson_title = update.message.text
+    if lesson_title == '🔙 Назад':
+        lesson_title = context.user_data["lesson_title"]
     chat_id = update.message.chat_id
 
     # Удаляем сообщение пользователя с выбором
@@ -2262,7 +2266,7 @@ if __name__ == '__main__':
                             Filters.text("🧑‍💻 Тесты"), get_available_tests_title
                         ),
                         MessageHandler(
-                            Filters.text("🔙 Назад"), get_available_topics_name
+                            Filters.text("🔙 Назад"), get_available_topic_info
                         ),
                         MessageHandler(
                             Filters.text("Практика"), get_available_practices_title
@@ -2285,7 +2289,7 @@ if __name__ == '__main__':
                             valid_practices_filter, get_practice_info
                         ),
                         MessageHandler(
-                            Filters.text("🔙 Назад"), get_available_topics_name
+                            Filters.text("🔙 Назад"), get_lesson_info
                         ),
                         MessageHandler(
                             Filters.text, handle_invalid_symbol
@@ -2296,7 +2300,7 @@ if __name__ == '__main__':
                             Filters.text("📖 Главное меню"), start
                         ),
                         MessageHandler(
-                            Filters.text("🔙 Назад"), get_available_topics_name
+                            Filters.text("🔙 Назад"), get_available_video_title
                         ),
                         MessageHandler(
                             Filters.text("Контрольный вопрос"), get_video_control_question
@@ -2337,7 +2341,7 @@ if __name__ == '__main__':
                             Filters.text("📖 Главное меню"), start
                         ),
                         MessageHandler(
-                            Filters.text("🔙 Назад"), get_available_topics_name
+                            Filters.text("🔙 Назад"), get_available_practices_title
                         ),
                         MessageHandler(
                             Filters.text("Отправить ответ на проверку"), send_practice_to_check
