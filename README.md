@@ -142,3 +142,77 @@ docker compose up
 При отсутствии ошибок в браузере вы сможете войти в админ панель
 `http://ip вашего сервера/admin/` по логину и паролю, который вы указали в `.env`
 а также запустить вашего бота по команде `/start`
+
+# Настройка надёжности
+1. Создание настройки для перезапуска проекта в случае сбоя работы сервера.
+Останавливаем контейнеры `docker compose down --volumes`
+~~~pycon
+sudo nano /etc/systemd/system/getcourse.service
+~~~
+Пишем в настройке
+~~~pycon
+[Unit]
+Description=GetCourse Docker Compose Service
+After=network.target docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/getcourse
+ExecStart=/usr/bin/docker compose up -d
+ExecStop=/usr/bin/docker compose down
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target
+~~~
+сохраняем запускаем
+~~~pycon
+sudo systemctl enable getcourse.service
+sudo systemctl start getcourse.service
+~~~
+проверяем статус
+~~~pycon
+sudo systemctl status getcourse.service
+
+● getcourse.service - GetCourse Docker Compose Service
+     Loaded: loaded (/etc/systemd/system/getcourse.service; enabled; vendor preset: enabled)
+     Active: active (exited) since Fri 2025-05-02 05:58:44 UTC; 10s ago
+    Process: 16069 ExecStart=/usr/bin/docker compose up -d (code=exited, status=0/SUCCESS)
+   Main PID: 16069 (code=exited, status=0/SUCCESS)
+        CPU: 183ms
+
+May 02 05:58:38 get-course2 docker[16084]:  Container pgdb  Started
+May 02 05:58:38 get-course2 docker[16084]:  Container pgdb  Waiting
+May 02 05:58:43 get-course2 docker[16084]:  Container pgdb  Healthy
+May 02 05:58:43 get-course2 docker[16084]:  Container django_backend  Starting
+May 02 05:58:44 get-course2 docker[16084]:  Container django_backend  Started
+May 02 05:58:44 get-course2 docker[16084]:  Container nginx  Starting
+May 02 05:58:44 get-course2 docker[16084]:  Container nginx  Started
+May 02 05:58:44 get-course2 docker[16084]:  Container it_bot-bot  Starting
+May 02 05:58:44 get-course2 docker[16084]:  Container it_bot-bot  Started
+May 02 05:58:44 get-course2 systemd[1]: Finished GetCourse Docker Compose Service.
+~~~
+
+При изменении файла настройки, нужно будет перезапустить
+~~~pycon
+sudo systemctl daemon-reload
+sudo systemctl enable getcourse.service
+sudo systemctl start getcourse.service
+sudo systemctl status getcourse.service
+~~~
+
+2. Настройка swap
+~~~pycon
+sudo fallocate -l 2G /swapfile
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile
+sudo swapon /swapfile
+
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+~~~
+проверка
+~~~pycon
+free -h
+~~~

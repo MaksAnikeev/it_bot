@@ -10,7 +10,8 @@ services:
       - POSTGRES_USER=${POSTGRES_USER}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
     volumes:
-      - data_db:/var/lib/postgresql/data
+#      - data_db:/var/lib/postgresql/data # для хранения бд в контейнере
+      - /opt/getcourse/postgres_data:/var/lib/postgresql/data # для хранения бд на сервере
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
@@ -93,6 +94,5 @@ services:
     restart: unless-stopped
 
 volumes:
-  data_db:
+#  data_db: # для хранения бд в контейнере
   collected_static:
-  media_volume:
