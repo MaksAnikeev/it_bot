@@ -216,3 +216,21 @@ echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
 ~~~pycon
 free -h
 ~~~
+3. Настройка backup базы данных
+В корне есть настройка `backup.sh` которая запускает создание резервной копии базы данных
+4. Нужно ее активизировать и поставить по таймеру
+~~~pycon
+chmod +x /opt/getcourse/backup.sh
+crontab -e
+~~~
+в созданном файле пишем
+~~~pycon
+0 2 * * * /opt/getcourse/backup.sh
+~~~
+
+восстановление базы данных из бекапа
+~~~pycon
+docker cp /opt/getcourse/backups/db_backup_*.dump pgdb:/tmp/restore.dump
+docker exec pgdb pg_restore -U max -d get_course_td_bot --verbose /tmp/restore.dump
+docker exec pgdb rm /tmp/restore.dump
+~~~
