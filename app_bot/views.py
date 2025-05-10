@@ -738,7 +738,7 @@ def get_practice_info(request, lesson_title, practice_title):
         return Response(serializer.data, status=status.HTTP_200_OK)
     except Lesson.DoesNotExist:
         return Response({'error': f"Урок '{lesson_title}' не найдена"}, status=status.HTTP_404_NOT_FOUND)
-    except Video.DoesNotExist:
+    except Practice.DoesNotExist:
         return Response({'error': f"Практическое задание '{practice_title}' не найден в уроке '{lesson_title}'"},
                         status=status.HTTP_404_NOT_FOUND)
     except Exception as e:
@@ -798,16 +798,16 @@ def add_content_after_practice(request):
         return Response(
             {
                 'status': 'true',
-                'message': 'Content added after test',
+                'message': 'Content added after practice',
                 "next_content": next_content
             },
             status=status.HTTP_201_CREATED
         )
-    except Test.DoesNotExist:
-        return Response({'error': f"Тест с ID '{data['test_id']}' не найден"},
+    except Practice.DoesNotExist:
+        return Response({'error': f"Practice с ID '{data['practice_id']}' не найден"},
                         status=status.HTTP_404_NOT_FOUND)
     except TelegramUser.DoesNotExist:
-        return Response({'error': f"Пользователь с user_id '{data['user_id']}' не найден"},
+        return Response({'error': f"Пользователь с user_id '{data['telegram_id']}' не найден"},
                         status=status.HTTP_404_NOT_FOUND)
     except Exception as e:
         return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)

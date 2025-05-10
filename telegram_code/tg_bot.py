@@ -418,7 +418,7 @@ def send_to_admin(update: Update, context: CallbackContext) -> States:
                 <b>Ваше сообщение:</b>
                 {message}
                 """).replace("    ", "")
-    message_keyboard = [['📖 Главное меню']]
+    message_keyboard = [['📖 Главное меню', "🛠 Написать Админу"]]
     markup = ReplyKeyboardMarkup(message_keyboard,
                                  resize_keyboard=True,
                                  one_time_keyboard=True)
@@ -446,14 +446,13 @@ def send_to_admin(update: Update, context: CallbackContext) -> States:
             text=menu_msg,
             reply_markup=reply_markup,
             parse_mode=ParseMode.HTML).message_id
-        context.user_data['prev_message_ids'].append(message_id)
         update.message.chat.id = telegram_id
         return States.MAIN_MENU
 
     except requests.RequestException as e:
         logger.error(f"API request failed: {str(e)}")
         is_callback = bool(update.callback_query)
-        keyboard = [['📖 Главное меню']]
+        keyboard = [['📖 Главное меню', "🛠 Написать Админу"]]
         menu_msg = "Произошла ошибка отправки сообщения администратору напишите ему по номеру телефона +7 980 300 45 45"
         markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
         admin_message_id = send_message_bot(context, update, menu_msg, markup, is_callback)
@@ -1014,6 +1013,8 @@ def show_test_result(chat_id: int, context: CallbackContext, questions: list, co
                 reply_markup=markup,
                 parse_mode=ParseMode.HTML
             ).message_id
+            context.user_data['prev_message_ids'].append(message_id)
+
             return States.MAIN_MENU
 
     result_msg = "{:.0f}% правильных ответов - твой результат \n".format(percentage)
@@ -1960,7 +1961,7 @@ def send_practice_to_admin(update: Update, context: CallbackContext) -> States:
     except requests.RequestException as e:
         logger.error(f"API request failed: {str(e)}")
         is_callback = bool(update.callback_query)
-        keyboard = [['📖 Главное меню']]
+        keyboard = [['📖 Главное меню', "🛠 Написать Админу"]]
         menu_msg = "Произошла ошибка отправки практического домашнего задания администратору" \
                    " напишите ему по номеру телефона +7 980 300 45 45"
         markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
