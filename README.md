@@ -241,3 +241,22 @@ docker cp /opt/getcourse/backups/db_backup_*.dump pgdb:/tmp/restore.dump
 docker exec pgdb pg_restore -U max -d get_course_td_bot --verbose /tmp/restore.dump
 docker exec pgdb rm /tmp/restore.dump
 ~~~
+
+# Сохранение изменений БД с сервера на локал, чтобы потом использовать БД в другом проекте или сервере
+Входим в контейнер джанго
+~~~pycon
+docker exec -it django_backend bash
+~~~
+Делаем дамп БД
+~~~pycon
+python manage.py dumpdata --natural-foreign --natural-primary -e contenttypes -e admin.LogEntry > /app/db_start.json
+~~~
+Копируем файл БД на локальную машину, и переносим скопированный файл db_start.json в папку с проектом:
+~~~pycon
+docker cp django_backend:/app/db_start.json /mnt/d/Программирование/Devman/db_start.json
+~~~
+Перезапускаем докер компоуз чтобы скопированный файл попал в контейнер
+Для восстановления БД из файла в запущенном проекте
+~~~pycon
+docker exec -it django_backend python manage.py loaddata /app/db_start.json
+~~~

@@ -50,6 +50,9 @@ class States(Enum):
     AVAILABLE_CONTENT = auto()
     AVAILABLE_QUESTION = auto()
     AVAILABLE_FINISH = auto()
+    AVAILABLE_FINISH_VIDEO = auto()
+    AVAILABLE_FINISH_TEST = auto()
+    AVAILABLE_FINISH_PRACTICE = auto()
     ADMIN_ANSWER = auto()
     PRACTICE = auto()
 
@@ -100,29 +103,29 @@ def handle_api_error(update: Update, context: CallbackContext, error: Exception,
     context.user_data['prev_message_ids'].append(admin_message_id)
 
 
-def send_message_bot(context: CallbackContext, update: Update, text: str, markup, is_callback: bool = False) -> int:
+def send_message_bot(context: CallbackContext, update: Update, text: str, markup, is_callback: bool = False,
+                     chat_id: int = None) -> int:
     """Отправляет сообщение в зависимости от типа update (callback или message) и возвращает message_id."""
-    if is_callback:
-        chat_id = update.callback_query.message.chat.id
-        message = context.bot.send_message(
-            chat_id=chat_id,
-            text=text,
-            reply_markup=markup,
-            parse_mode=ParseMode.HTML
-        )
-    else:
-        # chat_id = update.message.chat_id
-        chat_id = update.effective_chat.id
-        message = context.bot.send_message(
-            chat_id=chat_id,
-            text=text,
-            reply_markup=markup,
-            parse_mode=ParseMode.HTML
-        )
+    if chat_id is None:
+        if is_callback and update and update.callback_query:
+            chat_id = update.callback_query.message.chat.id
+        elif update and update.effective_message:
+            chat_id = update.effective_chat.id
+        else:
+            chat_id = context.user_data.get('chat_id')
+            if not chat_id:
+                raise ValueError("Не удалось определить chat_id")
+
+    message = context.bot.send_message(
+        chat_id=chat_id,
+        text=text,
+        reply_markup=markup,
+        parse_mode=ParseMode.HTML
+    )
     return message.message_id
 
 
-def add_content_via_api(endpoint: str, payload: Dict, context: CallbackContext, update: Update) -> Dict:
+def add_content_via_api(endpoint: str, payload: Dict, context: CallbackContext, update: Update = None) -> [Dict, str, Dict]:
     """
     Вызывает API для добавления контента и возвращает данные о новом контенте.
 
@@ -140,9 +143,11 @@ def add_content_via_api(endpoint: str, payload: Dict, context: CallbackContext, 
         response.raise_for_status()
         content_data = response.json()
         next_content = content_data.get("next_content", {})
+        next_step = content_data.get("next_step", None)
+        next_step_params = content_data.get("next_step_params", {})
         if not next_content:
             logger.warning(f"Нет next_content в ответе API: {content_data}")
-        return next_content
+        return next_content, next_step, next_step_params
     except Exception as e:
         logger.error(f"Ошибка API ({endpoint}): {str(e)}")
         send_message_bot(context, update, "Ошибка при обновлении контента.", None, False)
@@ -174,14 +179,16 @@ def format_content_message(next_content: Dict) -> str:
     """).replace("  ", "")
 
 
-def send_content_message(context: CallbackContext, update: Update, message: str) -> int:
+def send_content_message(context: CallbackContext, message: str, chat_id: int = None, update: Update = None) -> int:
     """
     Отправляет сообщение с новым контентом и возвращает message_id.
     """
-    keyboard = [["📝 Доступные темы", "📖 Главное меню"]]
+    keyboard = [["📝 Доступные темы", "📖 Главное меню"],
+                ["Следующий шаг ➡️"]
+                ]
     markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
-    is_callback = bool(update.callback_query)
-    return send_message_bot(context, update, message, markup, is_callback)
+    is_callback = bool(update and update.callback_query) if update else False
+    return send_message_bot(context, update, message, markup, is_callback, chat_id)
 
 
 def get_menu_for_role(user_data: dict) -> tuple[str, list[list[str]]]:
@@ -761,14 +768,21 @@ def start_test(update: Update, context: CallbackContext) -> States:
     """Начинает тест."""
     test_title = update.message.text
     chat_id = update.message.chat_id
+    if test_title == "Следующий шаг ➡️" or test_title == "🔂 Еще раз":
+        test_title = context.user_data.get("test_title")
+        if not test_title:
+            context.bot.send_message(chat_id=chat_id, text="Ошибка: тест не определён.")
+            return States.MAIN_MENU
+
     context.bot.delete_message(chat_id=chat_id, message_id=update.message.message_id)
     delete_previous_messages(context, chat_id)
 
     telegram_id = get_telegram_id(update, context)
     if not telegram_id:
         logger.error("Не удалось получить telegram_id")
-        message_id = send_message_bot(context, update, "Ошибка: пользователь не идентифицирован.", None, False)
-        context.user_data['prev_message_ids'].append(message_id)
+        message_id = context.bot.send_message(chat_id=chat_id, text="Ошибка: пользователь не идентифицирован.",
+                                              parse_mode=ParseMode.HTML)
+        context.user_data['prev_message_ids'] = context.user_data.get('prev_message_ids', []) + [message_id]
         return States.MAIN_MENU
 
     # Проверяем роль пользователя
@@ -779,12 +793,8 @@ def start_test(update: Update, context: CallbackContext) -> States:
     response = call_api_get(f'bot/start_test/{test_title}')
     if response.ok:
         test_data = response.json()
-        context.user_data["test_id"] = test_data['test_id']
-        telegram_id = context.user_data["telegram_id"]
-        # Проверяем роль пользователя
-        user_role = get_user_role(telegram_id)
-        user_id = context.user_data.get('user_id')
-        test_state = {
+        context.user_data['test_title'] = test_title
+        context.user_data.update({
             'test_id': test_data['test_id'],
             'questions': test_data['questions'],
             'show_right_answer': test_data['show_right_answer'],
@@ -793,24 +803,25 @@ def start_test(update: Update, context: CallbackContext) -> States:
             'prev_message_ids': [],
             'chat_id': chat_id,
             'user_role': user_role,
-            'user_id': user_id
-        }
-        context.user_data.update(test_state)
-        return show_question(chat_id, context, test_state['questions'], test_state['current_question_index'],
-                             test_state['correct_answers'], test_state['prev_message_ids'], test_state['user_role'],
-                             test_state['user_id'], test_state['test_id'])
+            'user_id': context.user_data.get('user_id'),
+            'telegram_id': telegram_id
+        })
+        return show_question(chat_id, context)
     else:
-        message_id = send_message_bot(context, update, "Тест не найден.", None, False)
-        context.user_data['prev_message_ids'].append(message_id)
+        message_id = context.bot.send_message(chat_id=chat_id, text="Тест не найден.", parse_mode=ParseMode.HTML)
+        context.user_data['prev_message_ids'] = context.user_data.get('prev_message_ids', []) + [message_id]
         return States.TEST_LEVEL
 
 
-def show_question(chat_id: int, context: CallbackContext, questions: list, current_question_index: int,
-                  correct_answers: int, prev_message_ids: list, user_role: str, user_id: int, test_id: int) -> States:
+def show_question(chat_id: int, context: CallbackContext) -> States:
+    """Показывает текущий вопрос с вариантами ответа."""
+    questions = context.user_data['questions']
+    current_question_index = context.user_data['current_question_index']
+    prev_message_ids = context.user_data['prev_message_ids']
+
     """Показывает текущий вопрос с вариантами ответа."""
     if current_question_index >= len(questions):
-        return show_test_result(chat_id, context, questions, correct_answers, prev_message_ids, user_role,
-                                user_id, test_id)
+        return show_test_result(chat_id, context)
 
     question = questions[current_question_index]
     answers = question['answers']
@@ -824,7 +835,7 @@ def show_question(chat_id: int, context: CallbackContext, questions: list, curre
 
     Варианты ответа:
     {answers_text}
-    
+
     <b>Для выбора нескольких ответов укажите номера через запятую БЕЗ ПРОБЕЛА(например, 1,2).</b>
     """).replace("  ", "")
 
@@ -856,7 +867,8 @@ def show_question(chat_id: int, context: CallbackContext, questions: list, curre
             parse_mode=ParseMode.HTML
         ).message_id
 
-    prev_message_ids.append(message_id)  # Добавляем ID вопроса
+    prev_message_ids.append(message_id)
+    context.user_data['prev_message_ids'] = prev_message_ids
     return States.TEST_QUESTION
 
 
@@ -864,22 +876,22 @@ def handle_answer(update: Update, context: CallbackContext) -> States:
     """Обрабатывает ответ пользователя."""
     chat_id = update.message.chat_id
     user_answer = update.message.text
-    context.user_data['prev_message_ids'].append(update.message.message_id)
+    context.user_data['prev_message_ids'] = context.user_data.get('prev_message_ids', []) + [update.message.message_id]
 
     if 'questions' not in context.user_data or 'current_question_index' not in context.user_data:
-        context.bot.send_message(chat_id=chat_id, text="Ошибка: состояние теста не найдено. Начните тест заново.")
+        context.bot.send_message(chat_id=chat_id, text="Ошибка: состояние теста не найдено. Начните тест заново.",
+                                 parse_mode=ParseMode.HTML)
         return States.TEST_LEVEL
 
     questions = context.user_data['questions']
     current_question_index = context.user_data['current_question_index']
     show_right_answer = context.user_data.get('show_right_answer', False)
-    correct_answers = context.user_data.get('correct_answers', 0)
-    prev_message_ids = context.user_data.get('prev_message_ids', [])
-    test_id = context.user_data.get('test_id', None)
+    correct_answers = context.user_data['correct_answers']
+    prev_message_ids = context.user_data['prev_message_ids']
 
     # Проверяем, завершён ли тест
     if current_question_index >= len(questions):
-        context.bot.send_message(chat_id=chat_id, text="Тест уже завершён. Результаты отображены.")
+        context.bot.send_message(chat_id=chat_id, text="Тест уже завершён. Результаты отображены.", parse_mode=ParseMode.HTML)
         delete_previous_messages(context, chat_id, prev_message_ids)
         return States.MAIN_MENU
 
@@ -892,18 +904,18 @@ def handle_answer(update: Update, context: CallbackContext) -> States:
     try:
         user_answers = set(user_answer.split(',')) if user_answer else set()
     except ValueError:
-        context.bot.send_message(chat_id=chat_id, text="Ошибка: укажите номера ответов через запятую (например, 1,2).")
+        message_id = context.bot.send_message(chat_id=chat_id,
+                                              text="Ошибка: укажите номера ответов через запятую (например, 1,2).",
+                                              parse_mode=ParseMode.HTML).message_id
+        context.user_data['prev_message_ids'].append(message_id)
+
         return States.TEST_QUESTION
 
     if user_answers == correct_serial_numbers:
         correct_answers += 1
         msg = "🎉 Правильно!"
-        message_id = context.bot.send_message(
-            chat_id=chat_id,
-            text=msg,
-            reply_markup=None,
-            parse_mode=ParseMode.HTML
-        ).message_id
+        message_id = context.bot.send_message(chat_id=chat_id, text=msg, reply_markup=None,
+                                              parse_mode=ParseMode.HTML).message_id
     else:
         if show_right_answer:
             correct_descriptions = "\n".join([f"{a['serial_number']}. {a['description']}" for a in correct_answers_list])
@@ -912,82 +924,40 @@ def handle_answer(update: Update, context: CallbackContext) -> States:
             msg = "❌ Неправильно."
         message_id = context.bot.send_message(chat_id=chat_id, text=msg, parse_mode=ParseMode.HTML).message_id
 
-    prev_message_ids.append(message_id)  # Добавляем ID ответа
+    context.user_data['prev_message_ids'].append(message_id)
     current_question_index += 1
 
-    telegram_id = context.user_data["telegram_id"]
-    # Проверяем роль пользователя
-    user_role = get_user_role(telegram_id)
-    user_id = context.user_data.get('user_id')
-
     context.user_data.update({
-        'questions': questions,
         'current_question_index': current_question_index,
         'correct_answers': correct_answers,
-        'show_right_answer': show_right_answer,
-        'prev_message_ids': prev_message_ids,
-        'test_id': test_id,
-        'chat_id': chat_id,
-        'user_role': user_role,
-        'user_id': user_id
-
+        'prev_message_ids': prev_message_ids
     })
 
-    job_context = {
-        'chat_id': chat_id,
-        'questions': questions,
-        'current_question_index': current_question_index,
-        'correct_answers': correct_answers,
-        'show_right_answer': show_right_answer,
-        'prev_message_ids': prev_message_ids,
-        'test_id': test_id,
-        'user_id': user_id,
-        'user_role': user_role
-    }
-
-    context.job_queue.run_once(
-        lambda c: show_question(
-            c.job.context['chat_id'],
-            c,
-            c.job.context['questions'],
-            c.job.context['current_question_index'],
-            c.job.context['correct_answers'],
-            c.job.context['prev_message_ids'],
-            c.job.context['user_role'],
-            c.job.context['user_id'],
-            c.job.context['test_id']
-        ),
-        2,
-        context=job_context,
-        name=f"next_question_{chat_id}"
-    )
-    return States.TEST_QUESTION
+    return show_question(chat_id, context)
 
 
-def show_test_result(chat_id: int, context: CallbackContext, questions: list, correct_answers: int,
-                     prev_message_ids: list, user_role: str, user_id: int, test_id: int) -> States:
+def show_test_result(chat_id: int, context: CallbackContext) -> States:
     """Показывает итоговый результат теста."""
-    delete_previous_messages(context, chat_id, prev_message_ids)  # Удаляем все предыдущие сообщения
+    prev_message_ids = context.user_data.get('prev_message_ids', [])
+    delete_previous_messages(context, chat_id, prev_message_ids)
+
+    questions = context.user_data['questions']
+    correct_answers = context.user_data['correct_answers']
+    user_role = context.user_data['user_role']
+    user_id = context.user_data['user_id']
+    test_id = context.user_data['test_id']
 
     total_questions = len(questions)
     percentage = (correct_answers / total_questions) * 100
 
     if user_role in ('admin', 'client'):
         if percentage >= 80:
-            # Добавляем контент
             payload = {'user_id': user_id, 'test_id': test_id}
             logger.info(f"Добавление контента: user_id={user_id}, test_id={test_id}")
-            # Создаём фиктивный Update
-            fake_message = Message(
-                message_id=0,
-                date=None,
-                chat=Chat(id=chat_id, type='private'),
-                from_user=None
-            )
-            fake_update = Update(update_id=0, message=fake_message)
-            next_content = add_content_via_api('/bot/next_content_test/add/', payload, context, fake_update)
-            if not next_content:
-                # Ошибка добавления контента
+            logger.info(f"payload: {payload}")
+            result = add_content_via_api('/bot/next_content_test/add/', payload, context)
+            if not result or result[0] is None:
+                logger.error(f"Failed to add content, result: {result}")
                 keyboard = [["📝 Доступные темы", "📖 Главное меню"]]
                 markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
                 message_id = context.bot.send_message(
@@ -996,16 +966,41 @@ def show_test_result(chat_id: int, context: CallbackContext, questions: list, co
                     reply_markup=markup,
                     parse_mode=ParseMode.HTML
                 ).message_id
+                context.user_data['prev_message_ids'].append(message_id)
                 return States.MAIN_MENU
+
+            next_content, next_step, next_step_params = result
 
             # Формируем и отправляем сообщение о новом контенте
             menu_msg = format_content_message(next_content)
-            message_id = send_content_message(context, fake_update, menu_msg)
-            return States.AVAILABLE_FINISH
+            message_id = send_content_message(context, menu_msg, chat_id=chat_id)
+            context.user_data['prev_message_ids'].append(message_id)
 
+            logger.info(f"Next step determined: {next_step}, params: {next_step_params}")
+
+            if next_step == 'topic':
+                context.user_data['topic_title'] = next_step_params.get('topic_title')
+                return States.AVAILABLE_TOPIC
+            elif next_step == 'lesson':
+                context.user_data['topic_title'] = next_step_params.get('topic_title')
+                context.user_data['lesson_title'] = next_step_params.get('lesson_title')
+                return States.AVAILABLE_LESSON
+            elif next_step == 'video':
+                context.user_data['video_title'] = next_step_params.get('video_title')
+                context.user_data['lesson_title'] = next_step_params.get('lesson_title')
+                return States.AVAILABLE_FINISH_VIDEO
+            elif next_step == 'test':
+                context.user_data['test_title'] = next_step_params.get('test_title')
+                return States.AVAILABLE_FINISH_TEST
+            elif next_step == 'practice':
+                context.user_data['practice_title'] = next_step_params.get('practice_title')
+                context.user_data['lesson_title'] = next_step_params.get('lesson_title')
+                return States.AVAILABLE_FINISH_PRACTICE
+            else:
+                return States.AVAILABLE_FINISH
         else:
-            # Тест не пройден
-            keyboard = [["📝 Доступные темы", "📖 Главное меню"]]
+            keyboard = [["📝 Доступные темы", "📖 Главное меню"],
+                        ["🔂 Еще раз"]]
             markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
             message_id = context.bot.send_message(
                 chat_id=chat_id,
@@ -1014,17 +1009,15 @@ def show_test_result(chat_id: int, context: CallbackContext, questions: list, co
                 parse_mode=ParseMode.HTML
             ).message_id
             context.user_data['prev_message_ids'].append(message_id)
-
             return States.MAIN_MENU
 
     result_msg = "{:.0f}% правильных ответов - твой результат \n".format(percentage)
-
     if percentage >= 80:
         result_msg += "🎉 Молодец! Ты набрал более 80% правильных ответов."
     elif percentage >= 50:
-        result_msg += "👍 Это нормально! Ты набрал более 50% правильных ответов.".format(percentage)
+        result_msg += "👍 Это нормально! Ты набрал более 50% правильных ответов."
     else:
-        result_msg += "📚 Надо подтянуться! Ты набрал менее 50% правильных ответов.".format(percentage)
+        result_msg += "📚 Надо подтянуться! Ты набрал менее 50% правильных ответов."
 
     keyboard = [["📖 Главное меню", "Оплата"]]
     markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
@@ -1034,6 +1027,7 @@ def show_test_result(chat_id: int, context: CallbackContext, questions: list, co
         reply_markup=markup,
         parse_mode=ParseMode.HTML
     ).message_id
+    context.user_data['prev_message_ids'] = [message_id]
     return States.TEST_QUESTION
 
 
@@ -1370,7 +1364,7 @@ def get_available_topics_name(update: Update, context: CallbackContext) -> State
 def get_available_topic_info(update: Update, context: CallbackContext) -> States:
     """Получает информацию о выбранной теме и список уроков в ней"""
     topic_title = update.message.text
-    if topic_title == '🔙 Назад':
+    if topic_title == '🔙 Назад' or topic_title == "Следующий шаг ➡️":
         topic_title = context.user_data["topic_title"]
     chat_id = update.message.chat_id
 
@@ -1400,8 +1394,11 @@ def get_available_topic_info(update: Update, context: CallbackContext) -> States
             {description}
         """).replace("  ", "")
 
-        lessons = context.user_data['available_lessons']
-        topics_buttons = [lesson["title"] for lesson in lessons if lesson["lesson_id"] in topic_lessons_id]
+        telegram_id = get_telegram_id(update, context)
+        response = call_api_get(f"bot/available_topics/{telegram_id}")
+        response.raise_for_status()
+        availability = response.json()
+        topics_buttons = [lesson["title"] for lesson in availability['lessons'] if lesson["lesson_id"] in topic_lessons_id]
         topics_buttons.extend(["📖 Главное меню", "🔙 Назад"])
         keyboard = list(chunked(topics_buttons, 2))
         markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
@@ -1439,16 +1436,16 @@ def get_available_topic_info(update: Update, context: CallbackContext) -> States
 def get_lesson_info(update: Update, context: CallbackContext) -> States:
     """Получает информацию о выбранном уроке"""
     lesson_title = update.message.text
-    if lesson_title == '🔙 Назад':
+    if lesson_title == '🔙 Назад' or lesson_title == "Следующий шаг ➡️":
         lesson_title = context.user_data["lesson_title"]
     chat_id = update.message.chat_id
+
+    topic_title = context.user_data["topic_title"]
 
     # Удаляем сообщение пользователя с выбором
     context.bot.delete_message(chat_id=chat_id, message_id=update.message.message_id)
     # Удаляем предыдущие сообщения
     delete_previous_messages(context, chat_id)
-
-    topic_title = context.user_data["topic_title"]
 
     response = call_api_get(f"bot/lesson/{topic_title}/{lesson_title}")
     try:
@@ -1548,6 +1545,9 @@ def get_video_info(update: Update, context: CallbackContext) -> States:
     """Получает информацию о выбранном видео"""
     video_title = update.message.text
     chat_id = update.message.chat_id
+
+    if video_title == "Следующий шаг ➡️":
+        video_title = context.user_data["video_title"]
 
     # Удаляем сообщение пользователя с выбором
     context.bot.delete_message(chat_id=chat_id, message_id=update.message.message_id)
@@ -1692,17 +1692,45 @@ def handle_video_question_answer(update: Update, context: CallbackContext) -> St
             'user_id': user_id,
             'video_id': video_id,
         }
-        next_content = add_content_via_api('/bot/next_content/add/', payload, context, update)
+        logger.info(f"payload: {payload}")
+        result = add_content_via_api('/bot/next_content/add/', payload, context, update)
+        if not result or result[0] is None:  # Проверяем, что результат не None
+            logger.error(f"Failed to add content, result: {result}")
+            return States.MAIN_MENU
+
+        next_content, next_step, next_step_params = result
+
         if not next_content:
             # Ошибка уже обработана в add_content_via_api
             return States.MAIN_MENU
-
         # Формируем и отправляем сообщение о новом контенте
         menu_msg = format_content_message(next_content)
-        message_id = send_content_message(context, update, menu_msg)
+        message_id = send_content_message(context, menu_msg, chat_id=chat_id)
         context.user_data['prev_message_ids'].append(message_id)
 
-        return States.AVAILABLE_FINISH
+        logger.info(f"Next step determined: {next_step}, params: {next_step_params}")
+
+        # Определяем, что доступно пользователю после успешного ответа и отправляем его в соответствующий States
+        if next_step == 'topic':
+            context.user_data['topic_title'] = next_step_params['topic_title']
+            return States.AVAILABLE_TOPIC
+        elif next_step == 'lesson':
+            context.user_data['topic_title'] = next_step_params['topic_title']
+            context.user_data['lesson_title'] = next_step_params['lesson_title']
+            return States.AVAILABLE_LESSON
+        elif next_step == 'video':
+            context.user_data['video_title'] = next_step_params['video_title']
+            context.user_data['lesson_title'] = next_step_params['lesson_title']
+            return States.AVAILABLE_FINISH_VIDEO
+        elif next_step == 'test':
+            context.user_data['test_title'] = next_step_params['test_title']
+            return States.AVAILABLE_FINISH_TEST
+        elif next_step == 'practice':
+            context.user_data['practice_title'] = next_step_params['practice_title']
+            context.user_data['lesson_title'] = next_step_params['lesson_title']
+            return States.AVAILABLE_FINISH_PRACTICE
+        else:
+            return States.AVAILABLE_FINISH
 
     else:
         msg = "❌ Неправильно. Попробуй снова"
@@ -1849,6 +1877,9 @@ def get_available_practices_title(update: Update, context: CallbackContext) -> S
 def get_practice_info(update: Update, context: CallbackContext) -> States:
     """Получает информацию о выбранном практическом задании"""
     practice_title = update.message.text
+    if practice_title == "Следующий шаг ➡️":
+        practice_title = context.user_data["practice_title"]
+
     context.user_data["practice_title"] = practice_title
     chat_id = update.message.chat_id
 
@@ -1859,7 +1890,6 @@ def get_practice_info(update: Update, context: CallbackContext) -> States:
 
     lesson_title = context.user_data["lesson_title"]
     response = call_api_get(f"bot/practice/{lesson_title}/{practice_title}")
-    context.user_data["lesson_title"] = practice_title
 
     try:
         response.raise_for_status()
@@ -1988,29 +2018,119 @@ def get_admin_approval(update: Update, context: CallbackContext):
     query = update.callback_query
     query.answer()
     callback_data = query.data
-    telegram_id = get_telegram_id(update, context)
+    telegram_id = get_telegram_id(update, context)  # chat_id администратора
 
     # Извлекаем информацию из callback_data
     client_chat_id = callback_data.split('_')[-1]
     practice_id = callback_data.split('_')[-2]
+
+    message_id = query.message.message_id
+    context.user_data['prev_message_ids'].append(message_id)
+
+    menu_msg = 'Ответ отправлен пользователю. Нажмите кнопку "📖 Главное меню" или /start'
+    keyboard = [["📖 Главное меню"]]
+    markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
+
+    message_id = context.bot.send_message(
+        chat_id=telegram_id,
+        text=menu_msg,
+        reply_markup=markup,
+        parse_mode=ParseMode.HTML
+    )
+    context.user_data['prev_message_ids'].append(message_id)
+
+    # Подготовка данных для API
     payload = {
         'practice_id': practice_id,
         'telegram_id': client_chat_id
     }
-    next_content = add_content_via_api('/bot/next_content_practice/add/', payload, context, update)
+    next_content, next_step, next_step_params = add_content_via_api('/bot/next_content_practice/add/', payload,
+                                                                   context, update)
     if not next_content:
         # Ошибка уже обработана в add_content_via_api
         return States.MAIN_MENU
 
-    # Формируем и отправляем сообщение о новом контенте
+    # Сохраняем данные клиента во временном хранилище (например, context.bot_data)
+    context.bot_data.setdefault('client_updates', {})[client_chat_id] = {
+        'next_content': next_content,
+        'next_step': next_step,
+        'next_step_params': next_step_params
+    }
+
+    # Формируем и отправляем сообщение о новом контенте клиенту
     admin_answer = 'Администратор проверил и утвердил ваше домашнее задание \n'
     menu_msg = admin_answer + format_content_message(next_content)
-    context.bot.send_message(
+
+    keyboard = [["📝 Доступные темы", "📖 Главное меню"],
+                ["Следующий шаг ➡️"]
+                ]
+    markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
+    message_id = context.bot.send_message(
         chat_id=client_chat_id,
         text=menu_msg,
-        parse_mode=ParseMode.HTML)
-    message_id = query.message.message_id
+        reply_markup=markup,
+        parse_mode=ParseMode.HTML
+    ).message_id
     context.user_data['prev_message_ids'].append(message_id)
+
+    logger.info(f"Next step determined: {next_step}, params: {next_step_params}")
+    return States.AVAILABLE_FINISH  # Состояние для администратора
+
+
+def get_next_step_after_practice(update: Update, context: CallbackContext) -> States:
+    chat_id = update.effective_chat.id
+    # Удаляем предыдущие сообщения
+    delete_previous_messages(context, chat_id)
+
+    # Получаем сохранённые данные клиента
+    client_updates = context.bot_data.get('client_updates', {}).get(str(chat_id))
+    if not client_updates:
+        context.bot.send_message(chat_id=chat_id, text="Ошибка: данные следующего шага не найдены.", parse_mode=ParseMode.HTML)
+        return States.MAIN_MENU
+
+    next_step = client_updates['next_step']
+    next_step_params = client_updates['next_step_params']
+
+    # Обновляем context.user_data для клиента
+    if next_step == 'topic':
+        context.user_data['topic_title'] = next_step_params.get('topic_title')
+    elif next_step == 'lesson':
+        context.user_data['topic_title'] = next_step_params.get('topic_title')
+        context.user_data['lesson_title'] = next_step_params.get('lesson_title')
+    elif next_step == 'video':
+        context.user_data['video_title'] = next_step_params.get('video_title')
+        context.user_data['lesson_title'] = next_step_params.get('lesson_title')
+    elif next_step == 'test':
+        context.user_data['test_title'] = next_step_params.get('test_title')
+    elif next_step == 'practice':
+        context.user_data['practice_title'] = next_step_params.get('practice_title')
+        context.user_data['lesson_title'] = next_step_params.get('lesson_title')
+
+    menu_msg = "Нажми еще раз Следующий шаг"
+    telegram_id = get_telegram_id(update, context)
+    keyboard = [["📝 Доступные темы", "📖 Главное меню"],
+                ["Следующий шаг ➡️"]
+                ]
+    markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
+    message_id = context.bot.send_message(
+        chat_id=telegram_id,
+        text=menu_msg,
+        reply_markup=markup,
+        parse_mode=ParseMode.HTML
+    ).message_id
+    context.user_data['prev_message_ids'].append(message_id)
+
+    # Определяем следующее состояние
+    if next_step == 'topic':
+        return States.AVAILABLE_TOPIC
+    elif next_step == 'lesson':
+        return States.AVAILABLE_LESSON
+    elif next_step == 'video':
+        return States.AVAILABLE_FINISH_VIDEO
+    elif next_step == 'test':
+        return States.AVAILABLE_FINISH_TEST
+    elif next_step == 'practice':
+        return States.AVAILABLE_FINISH_PRACTICE
     return States.AVAILABLE_FINISH
 
 
@@ -2065,6 +2185,9 @@ if __name__ == '__main__':
                             MessageHandler(
                                 Filters.text("🛠 Написать Админу"), message_to_admin
                             ),
+                            MessageHandler(
+                                Filters.text("Следующий шаг ➡️"), get_next_step_after_practice
+                            ),
                             CallbackQueryHandler(
                                 handle_message_from_client, pattern='^answer_client_'
                             ),
@@ -2101,6 +2224,12 @@ if __name__ == '__main__':
                             ),
                             MessageHandler(
                                 Filters.text("🛠 Написать Админу"), message_to_admin
+                            ),
+                            MessageHandler(
+                                Filters.text("🔂 Еще раз"), start_test
+                            ),
+                            MessageHandler(
+                                Filters.text("Следующий шаг ➡️"), get_next_step_after_practice
                             ),
                             CallbackQueryHandler(
                                 get_admin_approval, pattern='^practice_'
@@ -2236,6 +2365,9 @@ if __name__ == '__main__':
                                 Filters.text("📖 Главное меню"), start
                           ),
                           MessageHandler(
+                                Filters.text("Следующий шаг ➡️"), get_available_topic_info
+                          ),
+                          MessageHandler(
                                 valid_topic_filter, get_available_topic_info
                           ),
                           MessageHandler(
@@ -2246,6 +2378,9 @@ if __name__ == '__main__':
                          MessageHandler(
                                 Filters.text("📖 Главное меню"), start
                          ),
+                        MessageHandler(
+                            Filters.text("Следующий шаг ➡️"), get_lesson_info
+                        ),
                          MessageHandler(
                                 valid_lesson_filter, get_lesson_info
                          ),
@@ -2317,9 +2452,54 @@ if __name__ == '__main__':
                         MessageHandler(
                             Filters.text("📝 Доступные темы"), get_available_topics_name
                         ),
+                    MessageHandler(
+                        Filters.text("Следующий шаг ➡️"), get_next_step_after_practice
+                    ),
                         MessageHandler(
                             Filters.text, handle_invalid_symbol
                         ),
+            ],
+            States.AVAILABLE_FINISH_VIDEO: [
+                MessageHandler(
+                    Filters.text("📖 Главное меню"), start
+                ),
+                MessageHandler(
+                    Filters.text("📝 Доступные темы"), get_available_topics_name
+                ),
+                MessageHandler(
+                    Filters.text("Следующий шаг ➡️"), get_video_info
+                ),
+                MessageHandler(
+                    Filters.text, handle_invalid_symbol
+                ),
+            ],
+            States.AVAILABLE_FINISH_TEST: [
+                MessageHandler(
+                    Filters.text("📖 Главное меню"), start
+                ),
+                MessageHandler(
+                    Filters.text("📝 Доступные темы"), get_available_topics_name
+                ),
+                MessageHandler(
+                    Filters.text("Следующий шаг ➡️"), start_test
+                ),
+                MessageHandler(
+                    Filters.text, handle_invalid_symbol
+                ),
+            ],
+            States.AVAILABLE_FINISH_PRACTICE: [
+                MessageHandler(
+                    Filters.text("📖 Главное меню"), start
+                ),
+                MessageHandler(
+                    Filters.text("📝 Доступные темы"), get_available_topics_name
+                ),
+                MessageHandler(
+                    Filters.text("Следующий шаг ➡️"), get_practice_info
+                ),
+                MessageHandler(
+                    Filters.text, handle_invalid_symbol
+                ),
             ],
             States.ADMIN: [
                         MessageHandler(
@@ -2346,6 +2526,9 @@ if __name__ == '__main__':
                         ),
                         MessageHandler(
                             Filters.text("Отправить ответ на проверку"), send_practice_to_check
+                        ),
+                        MessageHandler(
+                            Filters.text("Следующий шаг ➡️"), get_next_step_after_practice
                         ),
                         MessageHandler(
                             Filters.document, send_practice_to_admin

@@ -405,62 +405,6 @@ def get_tests(request):
     return Response(serializer.data, status=status.HTTP_200_OK)
 
 
-
-# @csrf_exempt
-# @api_view(['POST'])
-# def add_start_content(request):
-#     """Добавление стартового контента пользователю, избегая дубликатов."""
-#     data = request.data
-#     try:
-#         # Извлекаем объекты
-#         start_availability = StartUserAvailability.objects.get(tariff__title=data['tariff'])
-#         user = TelegramUser.objects.get(user_id=data['user'])
-#         user_availability, created = UserAvailability.objects.get_or_create(user=user)
-#
-#         # Получаем текущие доступные объекты пользователя
-#         current_topics = set(user_availability.topics.all())
-#         current_lessons = set(user_availability.lessons.all())
-#         current_videos = set(user_availability.videos.all())
-#         current_tests = set(user_availability.tests.all())
-#         current_practices = set(user_availability.practices.all())
-#         # Получаем стартовые объекты
-#         start_topics = set(start_availability.topics.all())
-#         start_lessons = set(start_availability.lessons.all())
-#         start_videos = set(start_availability.videos.all())
-#         start_tests = set(start_availability.tests.all())
-#         start_practices = set(start_availability.practices.all())
-#         # Добавляем только новые объекты
-#         new_topics = start_topics - current_topics
-#         new_lessons = start_lessons - current_lessons
-#         new_videos = start_videos - current_videos
-#         new_tests = start_tests - current_tests
-#         new_practices = start_practices - current_practices
-#         if new_topics:
-#             user_availability.topics.add(*new_topics)
-#         if new_lessons:
-#             user_availability.lessons.add(*new_lessons)
-#         if new_videos:
-#             user_availability.videos.add(*new_videos)
-#         if new_tests:
-#             user_availability.tests.add(*new_tests)
-#         if new_practices:
-#             user_availability.practices.add(*new_practices)
-#         user_availability.save()
-#
-#         return Response(
-#             {'status': 'true', 'message': 'Start content added successfully'},
-#             status=status.HTTP_201_CREATED
-#         )
-#     except StartUserAvailability.DoesNotExist:
-#         return Response({'error': f"Стартовый контент для тарифа '{data['tariff']}' не найден"},
-#                         status=status.HTTP_404_NOT_FOUND)
-#     except UserAvailability.DoesNotExist:
-#         return Response({'error': f"Пользователь с ID '{data['user']}' не найден"},
-#                         status=status.HTTP_404_NOT_FOUND)
-#     except Exception as e:
-#         return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
-
-
 def add_new_content(user_availability: 'UserAvailability',
                     topics: set = None,
                     lessons: set = None,
@@ -504,6 +448,96 @@ def add_new_content(user_availability: 'UserAvailability',
             user_availability.practices.add(*new_practices)
     # Сохраняем изменения
     user_availability.save()
+
+
+def get_serial_numbers(content):
+    """Возвращает последовательность получаемых объектов."""
+    hasattr(content, 'serial_number') and content.serial_number is not None
+    return content.serial_number
+
+
+def get_next_step(topics: set = None,
+                  lessons: set = None,
+                  videos: set = None,
+                  tests: set = None,
+                  practices: set = None) -> tuple[str, dict]:
+    """
+    Определяем следующий шаг после просмотра видео
+
+    Args:
+        topics, lessons, videos, tests, practices: Наборы объектов доступных после просмотра видео (опционально).
+    """
+    logger.info(f"get_next_step called with: topics={len(topics or [])}, lessons={len(lessons or [])}, "
+                f"videos={len(videos or [])}, tests={len(tests or [])}, practices={len(practices or [])}")
+
+    # Проверяем, что доступно после видео
+    if topics:
+        next_topic = min(topics, key=get_serial_numbers)
+        next_step = 'topic'
+        next_step_params = {'topic_title': next_topic.title}
+    elif lessons:
+        next_lesson = min(lessons, key=get_serial_numbers)
+        next_step = 'lesson'
+        try:
+            topic = Topic.objects.get(lessons__title=next_lesson.title)
+        except Lesson.DoesNotExist:
+            logger.error(f"Lesson '{next_lesson.title}' not found in Topic")
+            return '', {}
+        next_step_params = {'lesson_title': next_lesson.title,
+                            'topic_title': topic.title}
+    elif videos:
+        next_video = min(videos, key=get_serial_numbers)
+        next_step = 'video'
+        try:
+            lesson = Lesson.objects.get(videos__title=next_video.title)
+        except Lesson.DoesNotExist:
+            logger.error(f"Lesson for video '{next_video.title}' not found")
+            return '', {}
+        next_step_params = {'video_title': next_video.title,
+                            'lesson_title': lesson.title}
+    elif tests:
+        next_test = list(tests)[0]
+        next_step = 'test'
+        next_step_params = {'test_title': next_test.title}
+
+    elif practices:
+        next_practice = list(practices)[0]
+        next_step = 'practice'
+        try:
+            lesson = Lesson.objects.get(practices__title=next_practice.title)
+        except Lesson.DoesNotExist:
+            logger.error(f"Lesson for practice '{next_practice.title}' not found")
+            return '', {}
+        next_step_params = {'practice_title': next_practice.title,
+                            'lesson_title': lesson.title}
+    else:
+        logger.warning("No next step or content found")
+        next_step = None
+        next_step_params = {}
+
+    return next_step, next_step_params
+
+
+@api_view(['GET'])
+def get_lesson_video(request, topic_title, lesson_title):
+    """
+    Возвращает информацию по видео в выбранном уроке.
+    """
+    logger.info(f"Received topic_title: {topic_title}")
+    logger.info(f"Received lesson_title: {lesson_title}")
+    try:
+        topic = Topic.objects.get(title=topic_title)
+        lesson = Lesson.objects.get(title=lesson_title, topic=topic)
+        video = Video.objects.filter(lesson=lesson.lesson_id)
+        serializer = VideoSerializer(video, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+    except Topic.DoesNotExist:
+        return Response({'error': f"Тема '{topic_title}' не найдена"}, status=status.HTTP_404_NOT_FOUND)
+    except Lesson.DoesNotExist:
+        return Response({'error': f"Урок '{lesson_title}' не найден в теме '{topic_title}'"},
+                        status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 
 @csrf_exempt
@@ -587,11 +621,24 @@ def add_content_after_video(request):
             "next_tests_name": next_tests_name,
             "next_practices_name": next_practices_name,
         }
+        next_step, next_step_params = get_next_step(topics=next_topics,
+                                                    lessons=next_lessons,
+                                                    videos=next_videos,
+                                                    tests=next_tests,
+                                                    practices=next_practices)
+        if not next_step and not any([next_topics, next_lessons, next_videos, next_tests, next_practices]):
+            logger.warning(f"No next step or content found for video_id={data['video_id']}")
+            return Response(
+                {'status': 'false', 'message': 'Нет доступного следующего контента', "next_content": next_content},
+                status=status.HTTP_200_OK
+            )
 
         return Response(
             {'status': 'true',
              'message': 'Content added after video',
-             "next_content": next_content
+             "next_content": next_content,
+             "next_step": next_step,
+             "next_step_params": next_step_params
              },
             status=status.HTTP_201_CREATED
         )
@@ -646,12 +693,25 @@ def add_content_after_test(request):
             "next_tests_name": next_tests_name,
             "next_practices_name": next_practices_name,
         }
+        next_step, next_step_params = get_next_step(topics=next_topics,
+                                                    lessons=next_lessons,
+                                                    videos=next_videos,
+                                                    tests=next_tests,
+                                                    practices=next_practices)
+        if not next_step and not any([next_topics, next_lessons, next_videos, next_tests, next_practices]):
+            logger.warning(f"No next step or content found for video_id={data['video_id']}")
+            return Response(
+                {'status': 'false', 'message': 'Нет доступного следующего контента', "next_content": next_content},
+                status=status.HTTP_200_OK
+            )
 
         return Response(
             {
                 'status': 'true',
                 'message': 'Content added after test',
-                "next_content": next_content
+                "next_content": next_content,
+                "next_step": next_step,
+                "next_step_params": next_step_params
             },
             status=status.HTTP_201_CREATED
         )
@@ -795,12 +855,24 @@ def add_content_after_practice(request):
             "next_practices_name": next_practices_name,
         }
 
+        next_step, next_step_params = get_next_step(topics=next_topics,
+                                                    lessons=next_lessons,
+                                                    videos=next_videos,
+                                                    tests=next_tests,
+                                                    practices=next_practices)
+        if not next_step and not any([next_topics, next_lessons, next_videos, next_tests, next_practices]):
+            logger.warning(f"No next step or content found for video_id={data['video_id']}")
+            return Response(
+                {'status': 'false', 'message': 'Нет доступного следующего контента', "next_content": next_content},
+                status=status.HTTP_200_OK
+            )
         return Response(
-            {
-                'status': 'true',
-                'message': 'Content added after practice',
-                "next_content": next_content
-            },
+            {'status': 'true',
+             'message': 'Content added after video',
+             "next_content": next_content,
+             "next_step": next_step,
+             "next_step_params": next_step_params
+             },
             status=status.HTTP_201_CREATED
         )
     except Practice.DoesNotExist:
