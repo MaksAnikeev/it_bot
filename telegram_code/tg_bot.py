@@ -179,6 +179,57 @@ def format_content_message(next_content: Dict) -> str:
     """).replace("  ", "")
 
 
+def format_done_message(content_done: Dict) -> str:
+    """
+    Форматирует сообщение о пройденном контенте.
+    """
+    topics_str = "\n".join(
+        content_done.get('names_done', {}).get('names_done_topics', ['Нет пройденных тем'])) or "Нет пройденных тем"
+    lessons_str = "\n".join(content_done.get('names_done', {}).get('names_done_lessons', [
+        'Нет пройденных уроков'])) or "Нет пройденных уроков"
+    videos_str = "\n".join(
+        content_done.get('names_done', {}).get('names_done_videos', ['Нет пройденных видео'])) or "Нет пройденных видео"
+    tests_str = "\n".join(content_done.get('names_done', {}).get('names_done_tests',
+                                                                 ['Нет пройденных тестов'])) or "Нет пройденных тестов"
+    practices_str = "\n".join(content_done.get('names_done', {}).get('names_done_practices', [
+        'Нет пройденных практик'])) or "Нет пройденных практик"
+
+    topics_done = content_done['quantity_done']['quantity_done_topics']
+    lessons_done = content_done['quantity_done']['quantity_done_lessons']
+    videos_done = content_done['quantity_done']['quantity_done_videos']
+    tests_done = content_done['quantity_done']['quantity_done_tests']
+    practices_done = content_done['quantity_done']['quantity_done_practices']
+
+    topics_all = content_done['quantity_all']['topics']
+    lessons_all = content_done['quantity_all']['lessons']
+    videos_all = content_done['quantity_all']['videos']
+    tests_all = content_done['quantity_all']['tests']
+    practices_all = content_done['quantity_all']['practices']
+
+    def calc_percentage(done, total):
+        return int((done / total * 100) if total > 0 else 0)
+
+    return dedent(f"""\
+            Ваш прогресс:
+            <b>Выполнено тем {topics_done} из {topics_all}, Пройдено {calc_percentage(topics_done, topics_all)}% </b>
+            <b>Пройденные Темы:</b>
+            {topics_str}
+            <b>Выполнено уроков {lessons_done} из {lessons_all}, Пройдено {calc_percentage(lessons_done, lessons_all)}% </b>
+            <b>Пройденные Уроки:</b>
+            {lessons_str}
+            <b>Выполнено видео {videos_done} из {videos_all}, Пройдено {calc_percentage(videos_done, videos_all)}% </b>
+            <b>Пройденные Видео:</b>
+            {videos_str}
+            <b>Выполнено тесты {tests_done} из {tests_all}, Пройдено {calc_percentage(tests_done, tests_all)}% </b>
+            <b>Пройденные Тесты:</b>
+            {tests_str}
+            <b>Выполнено практические задания {practices_done} из {practices_all}, Пройдено {calc_percentage(practices_done,
+                                                                                                    practices_all)}% </b>
+            <b>Пройденные Практики:</b>
+            {practices_str}
+        """).replace("  ", "")
+
+
 def send_content_message(context: CallbackContext, message: str, chat_id: int = None, update: Update = None) -> int:
     """
     Отправляет сообщение с новым контентом и возвращает message_id.
@@ -211,7 +262,8 @@ def get_menu_for_role(user_data: dict) -> tuple[str, list[list[str]]]:
             Ну что ж давай уже приступим!!!!
         """)
         keyboard = [["📝 Доступные темы", "🖌 Тариф"],
-                    ["🗂 Темы уроков", "🛠 Написать Админу"]]
+                    ["🗂 Темы уроков", "🛠 Написать Админу"],
+                    ["⤴ Прогресс️"]]
     elif user_contact:
         name = user_contact["firstname"]
         text = dedent(f"""\
@@ -2134,6 +2186,29 @@ def get_next_step_after_practice(update: Update, context: CallbackContext) -> St
     return States.AVAILABLE_FINISH
 
 
+def user_done_progress(update: Update, context: CallbackContext) -> States:
+    """Присылает пользователю информацию по пройденным позициям."""
+    chat_id = update.effective_chat.id
+    context.user_data['prev_message_ids'].append(update.message.message_id if update.message else None)
+    telegram_id = get_telegram_id(update, context)
+
+    try:
+        response = call_api_get(f"bot/done_content/{telegram_id}")
+        response.raise_for_status()
+        done_content = response.json()
+        menu_msg = format_done_message(done_content)
+    except requests.RequestException as e:
+        logger.error(f"Ошибка API: {e}")
+        menu_msg = "Не удалось загрузить прогресс. Обратитесь к администратору."
+
+    keyboard = [["📖 Главное меню"]]
+    markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
+    is_callback = bool(update and update.callback_query) if update else False
+    message_id = send_message_bot(context, update, menu_msg, markup, is_callback, chat_id)
+    context.user_data['prev_message_ids'].append(message_id)
+    return States.MAIN_MENU
+
+
 if __name__ == '__main__':
     env = environs.Env()
     env.read_env()
@@ -2188,6 +2263,9 @@ if __name__ == '__main__':
                             MessageHandler(
                                 Filters.text("Следующий шаг ➡️"), get_next_step_after_practice
                             ),
+                            MessageHandler(
+                                Filters.text("⤴ Прогресс️"), user_done_progress
+                            ),
                             CallbackQueryHandler(
                                 handle_message_from_client, pattern='^answer_client_'
                             ),
@@ -2230,6 +2308,9 @@ if __name__ == '__main__':
                             ),
                             MessageHandler(
                                 Filters.text("Следующий шаг ➡️"), get_next_step_after_practice
+                            ),
+                            MessageHandler(
+                                Filters.text("⤴ Прогресс️"), user_done_progress
                             ),
                             CallbackQueryHandler(
                                 get_admin_approval, pattern='^practice_'

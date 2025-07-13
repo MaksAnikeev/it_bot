@@ -13,7 +13,7 @@ from rest_framework.response import Response
 from .forms import TopicForm
 from .models import (Lesson, Practice, Question, StartUserAvailability, Tariff,
                      TelegramUser, Test, Topic, UserAvailability, UserContact,
-                     Video)
+                     Video, UserDone)
 from .serializers import (LessonSerializer, PaymentSerializer,
                           PracticeSerializer, QuestionSerializer,
                           TariffSerializer, TelegramUserSerializer,
@@ -450,6 +450,60 @@ def add_new_content(user_availability: 'UserAvailability',
     user_availability.save()
 
 
+def add_done_content(user_done: 'UserDone',
+                    topics: set = None,
+                    lessons: set = None,
+                    videos: set = None,
+                    tests: set = None,
+                    practices: set = None) -> None:
+    """
+    Добавляет выполненный контент в UserDone, избегая дубликатов.
+
+    Args:
+        user_done: Объект UserDone, куда добавляется контент.
+        topics, lessons, videos, tests, practices: Наборы объектов для добавления (опционально).
+    """
+    # Получаем текущие выполненные объекты пользователя
+    current_topics = set(user_done.topics.all())
+    current_lessons = set(user_done.lessons.all())
+    current_videos = set(user_done.videos.all())
+    current_tests = set(user_done.tests.all())
+    current_practices = set(user_done.practices.all())
+    # Проверяем и добавляем только новые объекты
+    # Логика для тем и уроков - добавляем предыдущий по serial_number
+    if topics:
+        for topic in topics:
+            done_topic_serial_number = int(topic.serial_number) - 1
+            if done_topic_serial_number > 0:
+                done_topic = Topic.objects.filter(serial_number=done_topic_serial_number).first()
+                if done_topic and done_topic not in current_topics:
+                    user_done.topics.add(done_topic)
+                    lesson_done = Lesson.objects.filter(topic=done_topic).last()
+                    user_done.lessons.add(lesson_done)
+
+    if lessons:
+        for lesson in lessons:
+            done_lesson_serial_number = int(lesson.serial_number) - 1
+            if done_lesson_serial_number > 0:
+                done_lesson = Lesson.objects.filter(serial_number=done_lesson_serial_number).first()
+                if done_lesson and done_lesson not in current_lessons:
+                    user_done.lessons.add(done_lesson)
+
+    # Логика для видео, тестов и практик - добавляем переданные объекты
+    if videos:
+        new_done_videos = videos - current_videos
+        if new_done_videos:
+            user_done.videos.add(*new_done_videos)
+    if tests:
+        new_done_tests = tests - current_tests
+        if new_done_tests:
+            user_done.tests.add(*new_done_tests)
+    if practices:
+        new_done_practices = practices - current_practices
+        if new_done_practices:
+            user_done.practices.add(*new_done_practices)
+
+
 def get_serial_numbers(content):
     """Возвращает последовательность получаемых объектов."""
     hasattr(content, 'serial_number') and content.serial_number is not None
@@ -608,6 +662,15 @@ def add_content_after_video(request):
             practices=next_practices
         )
 
+        # Добавляем выполненный пользователем контент
+        user_done, created = UserDone.objects.get_or_create(user=user)
+        add_done_content(
+            user_done=user_done,
+            topics=next_topics,
+            lessons=next_lessons,
+            videos={video},
+        )
+
         # Формируем имена для ответа
         next_topics_name = [next_topic.title for next_topic in next_topics] or ["Нет новых тем"]
         next_lessons_name = [next_lesson.title for next_lesson in next_lessons] or ["Нет новых уроков"]
@@ -677,6 +740,14 @@ def add_content_after_test(request):
             videos=next_videos,
             tests=next_tests,
             practices=next_practices
+        )
+        # Добавляем выполненный пользователем контент
+        user_done, created = UserDone.objects.get_or_create(user=user)
+        add_done_content(
+            user_done=user_done,
+            topics=next_topics,
+            lessons=next_lessons,
+            tests={test},
         )
 
         # Формируем имена для ответа
@@ -840,6 +911,14 @@ def add_content_after_practice(request):
             practices=next_practices
         )
 
+        # Добавляем выполненный пользователем контент
+        user_done, created = UserDone.objects.get_or_create(user=user)
+        add_done_content(
+            user_done=user_done,
+            topics=next_topics,
+            lessons=next_lessons,
+            practices={practice},
+        )
         # Формируем имена для ответа
         next_topics_name = [next_topic.title for next_topic in next_topics] or ["Нет новых тем"]
         next_lessons_name = [next_lesson.title for next_lesson in next_lessons] or ["Нет новых уроков"]
@@ -880,6 +959,60 @@ def add_content_after_practice(request):
                         status=status.HTTP_404_NOT_FOUND)
     except TelegramUser.DoesNotExist:
         return Response({'error': f"Пользователь с user_id '{data['telegram_id']}' не найден"},
+                        status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['GET'])
+def get_user_progress(request, telegram_id):
+    """
+    Возвращает информацию по прогрессу пользователя.
+    """
+    logger.info(f"Received telegram_id: {telegram_id}")
+    try:
+        user = TelegramUser.objects.get(tg_id=telegram_id)
+        content_done, created = UserDone.objects.get_or_create(user=user)
+
+        # Получаем пройденные объекты пользователя
+        done_topics = content_done.topics.all()
+        done_lessons = content_done.lessons.all()
+        done_videos = content_done.videos.all()
+        done_tests = content_done.tests.all()
+        done_practices = content_done.practices.all()
+        names_done_topics = [done_topic.title for done_topic in done_topics]
+        names_done_lessons = [done_lesson.title for done_lesson in done_lessons]
+        names_done_videos = [done_video.title for done_video in done_videos]
+        names_done_tests = [done_test.title for done_test in done_tests]
+        names_done_practices = [done_practice.title for done_practice in done_practices]
+        payload = {
+            'names_done': {
+                'names_done_topics': names_done_topics,
+                'names_done_lessons': names_done_lessons,
+                'names_done_videos': names_done_videos,
+                'names_done_tests': names_done_tests,
+                'names_done_practices': names_done_practices},
+            'quantity_done': {
+                'quantity_done_topics': done_topics.count(),
+                'quantity_done_lessons': done_lessons.count(),
+                'quantity_done_videos': done_videos.count(),
+                'quantity_done_tests': done_tests.count(),
+                'quantity_done_practices': done_practices.count()},
+            'quantity_all': {
+                'topics': Topic.objects.all().count(),
+                'lessons': Lesson.objects.all().count(),
+                'videos': Video.objects.all().count(),
+                'tests': Test.objects.all().count(),
+                'practices': Practice.objects.all().count()
+            }
+        }
+        return Response(payload, status=status.HTTP_200_OK)
+
+    except TelegramUser.DoesNotExist:
+        return Response({'error': f"Пользователь '{telegram_id}' не найден"},
+                        status=status.HTTP_404_NOT_FOUND)
+    except UserDone.DoesNotExist:
+        return Response({'error': f"Выполненные задания для пользователя '{telegram_id}' не найдены"},
                         status=status.HTTP_404_NOT_FOUND)
     except Exception as e:
         return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)

@@ -151,142 +151,6 @@ class UserContact(models.Model):
         return f"Contact for {self.user.tg_name}"
 
 
-# Завершённые темы
-class TopicDone(models.Model):
-    topic_done_id = models.AutoField(primary_key=True)
-    user = models.ForeignKey(
-        TelegramUser,
-        on_delete=models.CASCADE,
-        related_name='topics_done',
-        db_index=True
-    )
-    date_to_done = models.DateTimeField(verbose_name='дата выполнения')
-    topic = models.ForeignKey(
-        'Topic',
-        on_delete=models.CASCADE,
-        verbose_name='тема',
-        related_name='done_by'
-    )
-
-    class Meta:
-        db_table = 'topicdone'
-        verbose_name = 'выполненная тема'
-        verbose_name_plural = 'выполненные темы'
-
-    def __str__(self):
-        return f"{self.user.tg_name} - {self.topic.title}"
-
-
-# Завершённые уроки
-class LessonDone(models.Model):
-    lesson_done_id = models.AutoField(primary_key=True)
-    user = models.ForeignKey(
-        TelegramUser,
-        on_delete=models.CASCADE,
-        related_name='lessons_done',
-        db_index=True
-    )
-    date_to_done = models.DateTimeField(verbose_name='дата выполнения')
-    lesson = models.ForeignKey(
-        'Lesson',
-        on_delete=models.CASCADE,
-        verbose_name='урок',
-        related_name='done_by'
-    )
-
-    class Meta:
-        db_table = 'lessondone'
-        verbose_name = 'выполненный урок'
-        verbose_name_plural = 'выполненные уроки'
-
-    def __str__(self):
-        return f"{self.user.tg_name} - {self.lesson.title}"
-
-
-# Просмотренные видео
-class VideoDone(models.Model):
-    video_done_id = models.AutoField(primary_key=True)
-    user = models.ForeignKey(
-        TelegramUser,
-        on_delete=models.CASCADE,
-        related_name='videos_done',
-        db_index=True
-    )
-    date_to_done = models.DateTimeField(verbose_name='дата просмотра')
-    video = models.ForeignKey(
-        'Video',
-        on_delete=models.CASCADE,
-        related_name='done_by'
-    )
-    breakpoint_video = models.TimeField(
-        blank=True,
-        null=True,
-        verbose_name='время остановки видео')
-
-    class Meta:
-        db_table = 'videodone'
-        verbose_name = 'просмотренное видео'
-        verbose_name_plural = 'просмотренные видео'
-
-
-    def __str__(self):
-        return f"{self.user.tg_name} - {self.video.title}"
-
-
-# Завершённые тесты
-class TestDone(models.Model):
-    test_done_id = models.AutoField(primary_key=True)
-    user = models.ForeignKey(
-        TelegramUser,
-        on_delete=models.CASCADE,
-        related_name='tests_done',
-        db_index=True
-    )
-    attempt = models.IntegerField(verbose_name='номер попытки')
-    result_ok = models.BooleanField(verbose_name='результат попытки')
-    date_to_done = models.DateTimeField(verbose_name='дата выполнения теста')
-    test = models.ForeignKey(
-        'Test',
-        on_delete=models.CASCADE,
-        related_name='done_by'
-    )
-
-    class Meta:
-        db_table = 'testdone'
-        verbose_name = 'выполненный тест'
-        verbose_name_plural = 'выполненные тесты'
-
-    def __str__(self):
-        return f"{self.user.tg_name} - {self.test.title}"
-
-
-# Выполненные практические задания
-class PracticeDone(models.Model):
-    practice_done_id = models.AutoField(primary_key=True)
-    user = models.ForeignKey(
-        TelegramUser,
-        on_delete=models.CASCADE,
-        related_name='practices_done',
-        db_index=True
-    )
-    result_ok = models.BooleanField(verbose_name='результат попытки')
-    date_to_done = models.DateTimeField(verbose_name='дата выполнения теста')
-    practice = models.ForeignKey(
-        'Practice',
-        on_delete=models.CASCADE,
-        verbose_name='практическое задание',
-        related_name='done_by'
-    )
-
-    class Meta:
-        db_table = 'practicedone'
-        verbose_name = 'выполненное практическое задание'
-        verbose_name_plural = 'выполненные практические задания'
-
-    def __str__(self):
-        return f"{self.user.tg_name} - {self.practice.title}"
-
-
 # Темы
 class Topic(models.Model):
     topic_id = models.AutoField(primary_key=True)
@@ -751,3 +615,55 @@ class StartUserAvailability(models.Model):
 
     def __str__(self):
         return f"Start availability for {self.tariff.title}"
+
+
+# Пройденный пользователем контент
+class UserDone(models.Model):
+    user = models.OneToOneField(
+        TelegramUser,
+        on_delete=models.CASCADE,
+        primary_key=True,
+        related_name='done'
+    )
+    topics = models.ManyToManyField(
+        Topic,
+        blank=True,
+        verbose_name='пройденные темы',
+        related_name='users_done'
+    )
+    lessons = models.ManyToManyField(
+        Lesson,
+        blank=True,
+        verbose_name='пройденные уроки',
+        related_name='users_done'
+    )
+    videos = models.ManyToManyField(
+        Video,
+        blank=True,
+        verbose_name='пройденные видео',
+        related_name='users_done'
+    )
+    tests = models.ManyToManyField(
+        Test,
+        blank=True,
+        verbose_name='пройденные тесты',
+        related_name='users_done'
+    )
+    practices = models.ManyToManyField(
+        Practice,
+        blank=True,
+        verbose_name='пройденные практические задания',
+        related_name='users_done'
+    )
+    last_updated = models.DateTimeField(
+        auto_now=True,
+        verbose_name='Последнее обновление'
+    )
+
+    class Meta:
+        db_table = 'users_done'
+        verbose_name = 'Пройденный пользователем контент'
+        verbose_name_plural = '4.2 Пройденный пользователем контент'
+
+    def __str__(self):
+        return f"Done for {self.user.tg_name}"

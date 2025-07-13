@@ -5,7 +5,7 @@ from django.utils.html import format_html, mark_safe, strip_tags
 
 from .models import (Answer, Lesson, Payment, Practice, Question,
                      StartUserAvailability, Tariff, TelegramUser, Test, Topic,
-                     UserAvailability, UserContact, Video, VideoSummary)
+                     UserAvailability, UserContact, Video, VideoSummary, UserDone)
 
 
 class UserContactInline(admin.TabularInline):
@@ -54,6 +54,32 @@ class PaymentAdmin(admin.ModelAdmin):
 @admin.register(UserAvailability)
 class UserAvailabilityAdmin(admin.ModelAdmin):
     list_display = ('user', 'get_topics', 'get_lessons', 'get_videos', 'get_tests', 'get_practices')
+    filter_horizontal = ('topics', 'lessons', 'videos', 'tests', 'practices')  # Удобный виджет для M2M
+
+    def get_topics(self, obj):
+        return ", ".join([topic.title for topic in obj.topics.all()])
+    get_topics.short_description = 'Темы'
+
+    def get_lessons(self, obj):
+        return ", ".join([lesson.title for lesson in obj.lessons.all()])
+    get_lessons.short_description = 'Уроки'
+
+    def get_videos(self, obj):
+        return ", ".join([video.title for video in obj.videos.all()])
+    get_videos.short_description = 'Видео'
+
+    def get_tests(self, obj):
+        return ", ".join([test.title for test in obj.tests.all()])
+    get_tests.short_description = 'Тесты'
+
+    def get_practices(self, obj):
+        return ", ".join([practice.title for practice in obj.practices.all()])
+    get_practices.short_description = 'Практики'
+
+
+@admin.register(UserDone)
+class UserDoneAdmin(admin.ModelAdmin):
+    list_display = ('user', 'last_updated', 'get_topics', 'get_lessons', 'get_videos', 'get_tests', 'get_practices')
     filter_horizontal = ('topics', 'lessons', 'videos', 'tests', 'practices')  # Удобный виджет для M2M
 
     def get_topics(self, obj):

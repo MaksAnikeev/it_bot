@@ -9,7 +9,7 @@ from .views import (add_content_after_practice, add_content_after_test,
                     get_lessons, get_practice_info, get_practices, get_tariff,
                     get_tariffs, get_test, get_tests, get_topic,
                     get_topic_lessons, get_topics, get_user, get_video_info,
-                    get_video_question, get_videos, index_page)
+                    get_video_question, get_videos, index_page, get_user_progress)
 
 app_name = "app_bot"
 
@@ -46,5 +46,5 @@ urlpatterns = [
     path('practices/', get_practices),
     path('next_content_practice/add/', add_content_after_practice),
     path('health/', health_check, name='health_check'),
-
+    path('done_content/<int:telegram_id>/', get_user_progress),
 ]
