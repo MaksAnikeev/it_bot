@@ -55,6 +55,7 @@ class States(Enum):
     AVAILABLE_FINISH_PRACTICE = auto()
     ADMIN_ANSWER = auto()
     PRACTICE = auto()
+    INVOICE = auto()
 
 
 logger = logging.getLogger(__name__)
@@ -1234,7 +1235,8 @@ def send_payment(update, context):
         logger.info("Invoice sent successfully")
 
         # Добавляем кнопку "💵 Оплатить" после инвойса т.к. юкасса не работает
-        keyboard = [[InlineKeyboardButton("💵 Оплатить", callback_data="process_payment")]]
+        keyboard = [[InlineKeyboardButton("💵 Оплатить", callback_data="process_payment")],
+                    [InlineKeyboardButton("🧾 Отправить чек администратору", callback_data="send_invoice")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         message_id = context.bot.send_message(chat_id=chat_id, text="Нажмите кнопку для завершения оплаты:",
                                  reply_markup=reply_markup).message_id
@@ -1324,6 +1326,112 @@ def successful_payment(update, context):
         logger.error(f"API request failed: {str(e)}")
         handle_api_error(update, context, e, chat_id)
         return States.ADMIN
+
+
+def send_invoice(update: Update, context: CallbackContext) -> States:
+    """Отправляет счет администратору на проверку"""
+    menu_msg = dedent(f"""
+                    1. Сделайте оплату по присланным реквизитам
+                    2. Сохраните чек в виде документа
+                    3. Прикрепите файл с чеком к сообщению и нажмите отправить
+                    """).replace("  ", "")
+    message_to_admin = send_message_bot(context, update, menu_msg, markup=None, is_callback=False)
+    context.user_data['prev_message_ids'].append(message_to_admin)
+    return States.INVOICE
+
+
+def send_invoice_to_admin(update: Update, context: CallbackContext) -> States:
+    user_fullname = str(update.message.from_user['first_name']) + ' ' + str(update.message.from_user['last_name'])
+    file_id = update.message.document.file_id
+    file_info = context.bot.get_file(file_id)
+    telegram_id = get_telegram_id(update, context)
+    menu_msg = dedent(f"""\
+                Ваш чек отправлен администратору на проверку,
+                 он свяжется с вами после проверки!
+                """).replace("    ", "")
+    message_keyboard = [['📖 Главное меню']]
+    markup = ReplyKeyboardMarkup(message_keyboard,
+                                 resize_keyboard=True,
+                                 one_time_keyboard=True)
+    message_to_admin = send_message_bot(context, update, menu_msg, markup, is_callback=False)
+    context.user_data['prev_message_ids'].append(message_to_admin)
+
+    # Получаем telegram_id администратора из БД
+    response = call_api_get('bot/get_tg_admin')
+    try:
+        response.raise_for_status()
+        admin_data = response.json()
+        admin_telegram_id = admin_data['tg_id']
+        update.message.chat.id = admin_telegram_id
+        admin_message = dedent(f"""\
+                    Чек об оплате от клиента
+                    <b>ИД клиента - ТГ имя:</b>
+                    {telegram_id} - {user_fullname}
+                    <b>Если чек правильный, то откройте клиенту в админке необходимый контент в ручную и 
+                    нажми кнопку 'Утвердить'"</b>
+                    <b>Если необходимо задать уточняющий вопрос, то нажми кнопку 'Ответить клиенту' и напишите ваши замечания"</b>
+                    """).replace("    ", "")
+
+        keyboard = [[InlineKeyboardButton(f"Утвердить", callback_data=f"approve_{telegram_id}")],
+                    [InlineKeyboardButton(f"Ответить клиенту", callback_data=f"answer_client_{telegram_id}")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        context.bot.send_document(
+            chat_id=admin_telegram_id,
+            document=file_info.file_id,
+            caption=admin_message,
+            reply_markup=reply_markup,
+            parse_mode=ParseMode.HTML
+        )
+        return States.MAIN_MENU
+
+    except requests.RequestException as e:
+        logger.error(f"API request failed: {str(e)}")
+        is_callback = bool(update.callback_query)
+        keyboard = [['📖 Главное меню', "🛠 Написать Админу"]]
+        menu_msg = "Произошла ошибка отправки практического домашнего задания администратору" \
+                   " напишите ему по номеру телефона +7 980 300 45 45"
+        markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
+        admin_message_id = send_message_bot(context, update, menu_msg, markup, is_callback)
+        context.user_data['prev_message_ids'].append(admin_message_id)
+        return States.MAIN_MENU
+
+
+def get_admin_invoice_approval(update: Update, context: CallbackContext):
+    query = update.callback_query
+    query.answer()
+    callback_data = query.data
+    telegram_id = get_telegram_id(update, context)  # chat_id администратора
+
+    # Извлекаем информацию из callback_data
+    client_chat_id = callback_data.split('_')[-1]
+
+    message_id = query.message.message_id
+    context.user_data['prev_message_ids'].append(message_id)
+
+    menu_msg = 'Ответ отправлен пользователю. Нажмите кнопку "📖 Главное меню" или /start'
+    keyboard = [["📖 Главное меню"]]
+    markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
+
+    message_id = context.bot.send_message(
+        chat_id=telegram_id,
+        text=menu_msg,
+        reply_markup=markup,
+        parse_mode=ParseMode.HTML
+    )
+    context.user_data['prev_message_ids'].append(message_id)
+
+    # Формируем и отправляем сообщение о новом контенте клиенту
+    menu_msg = 'Администратор проверил и утвердил вашу оплату. Вам доступны уроки по кнопке "📝 Доступные темы"'
+    keyboard = [["📝 Доступные темы", "📖 Главное меню"]]
+    markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
+    message_id = context.bot.send_message(
+        chat_id=client_chat_id,
+        text=menu_msg,
+        reply_markup=markup,
+        parse_mode=ParseMode.HTML
+    ).message_id
+    context.user_data['prev_message_ids'].append(message_id)
+    return States.AVAILABLE_FINISH  # Состояние для администратора
 
 
 def show_tariff_info(update: Update, context: CallbackContext) -> States:
@@ -2272,6 +2380,9 @@ if __name__ == '__main__':
                             CallbackQueryHandler(
                                 get_admin_approval, pattern='^practice_'
                             ),
+                            CallbackQueryHandler(
+                                get_admin_invoice_approval, pattern='^approve_'
+                            ),
                             MessageHandler(
                                 Filters.text, handle_invalid_symbol
                             ),
@@ -2317,6 +2428,9 @@ if __name__ == '__main__':
                             ),
                             CallbackQueryHandler(
                                 handle_message_from_client, pattern='^answer_client_'
+                            ),
+                            CallbackQueryHandler(
+                                get_admin_invoice_approval, pattern='^approve_'
                             ),
                             MessageHandler(
                                 Filters.text, handle_invalid_symbol
@@ -2437,6 +2551,9 @@ if __name__ == '__main__':
                            CallbackQueryHandler(
                                 process_payment, pattern="process_payment"
                            ),
+                            CallbackQueryHandler(
+                                send_invoice, pattern="send_invoice"
+                            ),
                             MessageHandler(
                                 Filters.text, handle_invalid_symbol
                            ),
@@ -2594,6 +2711,15 @@ if __name__ == '__main__':
                         ),
             ],
             States.ADMIN_ANSWER: [
+                        CallbackQueryHandler(
+                            handle_message_from_client, pattern='^answer_client_'
+                        ),
+                        CallbackQueryHandler(
+                            get_admin_approval, pattern='^practice_'
+                        ),
+                        CallbackQueryHandler(
+                            get_admin_invoice_approval, pattern='^approve_'
+                        ),
                         MessageHandler(
                             Filters.text, send_message_to_user
                         ),
@@ -2620,6 +2746,20 @@ if __name__ == '__main__':
                         MessageHandler(
                             Filters.text, not_send_document
                         ),
+            ],
+            States.INVOICE: [
+                MessageHandler(
+                    Filters.text("📖 Главное меню"), start
+                ),
+                MessageHandler(
+                    Filters.document, send_invoice_to_admin
+                ),
+                MessageHandler(
+                    Filters.photo, not_send_document
+                ),
+                MessageHandler(
+                    Filters.text, not_send_document
+                ),
             ]
         },
         fallbacks=[],
@@ -2627,7 +2767,6 @@ if __name__ == '__main__':
         name='bot_conversation',
         per_message=False,
     )
-
 
     # Добавление обработчика ошибок
     def error_handler(update: Update, context: CallbackContext):
