@@ -10,8 +10,8 @@ services:
       - POSTGRES_USER=${POSTGRES_USER}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
     volumes:
-#      - data_db:/var/lib/postgresql/data # для хранения бд в контейнере для локала
-      - /opt/getcourse/postgres_data:/var/lib/postgresql/data # для хранения бд на сервере
+      - data_db:/var/lib/postgresql/data # для хранения бд в контейнере для локала и запуска в контейнерах с локала
+#      - /opt/getcourse/postgres_data:/var/lib/postgresql/data # для хранения бд на сервере
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
@@ -47,8 +47,8 @@ services:
     volumes:
       - .:/app
       - collected_static:/app/collected_static
-      - /opt/getcourse/media:/app/media  # Монтируем папку с сервера
-#      - /mnt/d/Программирование/Devman/it_bot/media:/app/media  # Монтируем локальную папку
+#      - /opt/getcourse/media:/app/media  # Монтируем папку с сервера
+      - /mnt/d/Программирование/Devman/it_bot/media:/app/media  # Монтируем локальную папку для локала и запуска в контейнерах с локала
     depends_on:
       pgdb:
         condition: service_healthy
@@ -64,8 +64,8 @@ services:
     volumes:
       - ./hosts/get_course_bot_nginx.conf:/etc/nginx/conf.d/default.conf
       - collected_static:/static_bot/collected_static
-      - /opt/getcourse/media:/app/media  # Монтируем папку с сервера
-#      - /mnt/d/Программирование/Devman/it_bot/media:/app/media  # Монтируем локальную папку
+#      - /opt/getcourse/media:/app/media  # Монтируем папку с сервера
+      - /mnt/d/Программирование/Devman/it_bot/media:/app/media  # Монтируем локальную папку для локала и запуска в контейнерах с локала
     depends_on:
       backend:
         condition: service_started  # Изменено с service_healthy на service_started
@@ -93,6 +93,26 @@ services:
     container_name: it_bot-bot
     restart: unless-stopped
 
+  simpa_bot:
+    build: .
+    command: /bin/sh -c "sleep 30 && python /app/telegram_code/mock_simpa.py"
+    env_file:
+      - .env
+    environment:
+      - BASE_MEDIA_URL=${BASE_MEDIA_URL}
+    volumes:
+      - .:/app
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+    depends_on:
+      nginx:
+        condition: service_started
+      backend:
+        condition: service_started
+    container_name: simpa-bot
+    restart: unless-stopped
+
 volumes:
-#  data_db: # для хранения бд в контейнере для локала
+  data_db: # для хранения бд в контейнере для локала и запуска в контейнерах с локала
   collected_static:

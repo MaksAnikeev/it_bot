@@ -56,10 +56,10 @@ class States(Enum):
     ADMIN_ANSWER = auto()
     PRACTICE = auto()
     INVOICE = auto()
+    # AWAITING_SIMPA_MESSAGE = auto()
 
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
 
 def get_telegram_id(update: Update, context: CallbackContext) -> int:
@@ -265,6 +265,7 @@ def get_menu_for_role(user_data: dict) -> tuple[str, list[list[str]]]:
         keyboard = [["📝 Доступные темы", "🖌 Тариф"],
                     ["🗂 Темы уроков", "🛠 Написать Админу"],
                     ["⤴ Прогресс️"]]
+                    # ["⤴ Прогресс️", "Спроси у симпы"]]
     elif user_contact:
         name = user_contact["firstname"]
         text = dedent(f"""\
@@ -2317,6 +2318,56 @@ def user_done_progress(update: Update, context: CallbackContext) -> States:
     return States.MAIN_MENU
 
 
+# def send_message_to_simpa(update: Update, context: CallbackContext) -> States:
+#     """Отправляет сообщение в чат gpt."""
+#     chat_id = update.effective_chat.id
+#     context.user_data['prev_message_ids'].append(update.message.message_id)
+#
+#     # Запрашиваем сообщение у пользователя
+#     message = "Введите сообщение для симпа бота и нажмите отправить. Если передумали нажмите кнопку 📖 Главное меню"
+#     keyboard = [["📖 Главное меню"]]
+#     markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
+#     message_id = context.bot.send_message(
+#         chat_id=chat_id,
+#         text=message,
+#         reply_markup=markup,
+#         parse_mode=ParseMode.HTML
+#     )
+#     context.user_data['prev_message_ids'].append(message_id)
+#     context.user_data['awaiting_simpa_message'] = True
+#     return States.AWAITING_SIMPA_MESSAGE
+
+
+# def process_simpa_message(update: Update, context: CallbackContext) -> States:
+#     """Обрабатывает введённое пользователем сообщение и отправляет его gpt боту."""
+#     chat_id = update.effective_chat.id
+#     user_message = update.message.text
+#     context.user_data.pop('awaiting_friend_message', None)
+#
+#     # gpt_bot = Bot(token=gpt_bot_token)
+#
+#     try:
+#         # Отправляем сообщение gpt боту с идентификатором "getcourse" и оригинальным chat_id
+#         full_message = f"getcourse {user_message} [chat_id:{chat_id}]"
+#         response = context.bot.send_message(
+#             chat_id=group_chat_id,
+#             text=full_message
+#         )
+#         print(11111111, full_message)
+#         menu_msg = "Сообщение отправлено симпа боту. Ожидайте ответа!"
+#
+#     except Exception as e:
+#         logger.error(f"Ошибка отправки сообщения симпа боту: {e}")
+#         menu_msg = "Ошибка при отправке сообщения симпа боту. Попробуйте позже."
+#
+#     keyboard = [["📖 Главное меню"]]
+#     markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
+#     is_callback = bool(update and update.callback_query) if update else False
+#     message_id = send_message_bot(context, update, menu_msg, markup, is_callback, chat_id)
+#     context.user_data['prev_message_ids'].append(message_id)
+#     return States.MAIN_MENU
+
+
 if __name__ == '__main__':
     env = environs.Env()
     env.read_env()
@@ -2327,13 +2378,16 @@ if __name__ == '__main__':
 
     telegram_bot_token = env.str("TG_BOT_TOKEN")
     provider_ukassa_token = env.str("PAYMENT_UKASSA_TOKEN")
+    # gpt_bot_chat_id = env.str("GPT_BOT_CHAT_ID")
+    # gpt_bot_token = env.str("GPT_BOT_TOKEN")
+    # group_chat_id = env.str("GROUP_CHAT_ID")
 
     # Настройка Request с увеличенными таймаутами
     request = Request(connect_timeout=10, read_timeout=30)  # 10 сек на соединение, 30 сек на чтение
     bot = Bot(token=telegram_bot_token, request=request)
 
     # Создание Updater с настроенным ботом
-    updater = Updater(bot=bot, use_context=True)
+    updater = Updater(bot=bot, use_context=True, request_kwargs={'connection_pool_maxsize': 5000})
     dispatcher = updater.dispatcher
 
     valid_topic_filter = ValidTopicFilter()
@@ -2374,6 +2428,9 @@ if __name__ == '__main__':
                             MessageHandler(
                                 Filters.text("⤴ Прогресс️"), user_done_progress
                             ),
+                            # MessageHandler(
+                            #     Filters.text("Спроси у симпы"), send_message_to_simpa
+                            # ),
                             CallbackQueryHandler(
                                 handle_message_from_client, pattern='^answer_client_'
                             ),
@@ -2423,6 +2480,9 @@ if __name__ == '__main__':
                             MessageHandler(
                                 Filters.text("⤴ Прогресс️"), user_done_progress
                             ),
+                            # MessageHandler(
+                            #     Filters.text("Спроси у симпы"), send_message_to_simpa
+                            # ),
                             CallbackQueryHandler(
                                 get_admin_approval, pattern='^practice_'
                             ),
@@ -2658,47 +2718,47 @@ if __name__ == '__main__':
                         ),
             ],
             States.AVAILABLE_FINISH_VIDEO: [
-                MessageHandler(
-                    Filters.text("📖 Главное меню"), start
-                ),
-                MessageHandler(
-                    Filters.text("📝 Доступные темы"), get_available_topics_name
-                ),
-                MessageHandler(
-                    Filters.text("Следующий шаг ➡️"), get_video_info
-                ),
-                MessageHandler(
-                    Filters.text, handle_invalid_symbol
-                ),
-            ],
+                        MessageHandler(
+                            Filters.text("📖 Главное меню"), start
+                        ),
+                        MessageHandler(
+                            Filters.text("📝 Доступные темы"), get_available_topics_name
+                        ),
+                        MessageHandler(
+                            Filters.text("Следующий шаг ➡️"), get_video_info
+                        ),
+                        MessageHandler(
+                            Filters.text, handle_invalid_symbol
+                        ),
+                    ],
             States.AVAILABLE_FINISH_TEST: [
-                MessageHandler(
-                    Filters.text("📖 Главное меню"), start
-                ),
-                MessageHandler(
-                    Filters.text("📝 Доступные темы"), get_available_topics_name
-                ),
-                MessageHandler(
-                    Filters.text("Следующий шаг ➡️"), start_test
-                ),
-                MessageHandler(
-                    Filters.text, handle_invalid_symbol
-                ),
-            ],
+                        MessageHandler(
+                            Filters.text("📖 Главное меню"), start
+                        ),
+                        MessageHandler(
+                            Filters.text("📝 Доступные темы"), get_available_topics_name
+                        ),
+                        MessageHandler(
+                            Filters.text("Следующий шаг ➡️"), start_test
+                        ),
+                        MessageHandler(
+                            Filters.text, handle_invalid_symbol
+                        ),
+                    ],
             States.AVAILABLE_FINISH_PRACTICE: [
-                MessageHandler(
-                    Filters.text("📖 Главное меню"), start
-                ),
-                MessageHandler(
-                    Filters.text("📝 Доступные темы"), get_available_topics_name
-                ),
-                MessageHandler(
-                    Filters.text("Следующий шаг ➡️"), get_practice_info
-                ),
-                MessageHandler(
-                    Filters.text, handle_invalid_symbol
-                ),
-            ],
+                        MessageHandler(
+                            Filters.text("📖 Главное меню"), start
+                        ),
+                        MessageHandler(
+                            Filters.text("📝 Доступные темы"), get_available_topics_name
+                        ),
+                        MessageHandler(
+                            Filters.text("Следующий шаг ➡️"), get_practice_info
+                        ),
+                        MessageHandler(
+                            Filters.text, handle_invalid_symbol
+                        ),
+                    ],
             States.ADMIN: [
                         MessageHandler(
                             Filters.text("📖 Главное меню"), start
@@ -2746,21 +2806,29 @@ if __name__ == '__main__':
                         MessageHandler(
                             Filters.text, not_send_document
                         ),
-            ],
+                    ],
             States.INVOICE: [
-                MessageHandler(
-                    Filters.text("📖 Главное меню"), start
-                ),
-                MessageHandler(
-                    Filters.document, send_invoice_to_admin
-                ),
-                MessageHandler(
-                    Filters.photo, not_send_document
-                ),
-                MessageHandler(
-                    Filters.text, not_send_document
-                ),
-            ]
+                        MessageHandler(
+                            Filters.text("📖 Главное меню"), start
+                        ),
+                        MessageHandler(
+                            Filters.document, send_invoice_to_admin
+                        ),
+                        MessageHandler(
+                            Filters.photo, not_send_document
+                        ),
+                        MessageHandler(
+                            Filters.text, not_send_document
+                        ),
+                    ],
+            # States.AWAITING_SIMPA_MESSAGE: [
+            #             MessageHandler(
+            #                 Filters.text("📖 Главное меню"), start
+            #             ),
+            #             MessageHandler(
+            #                 Filters.text & ~Filters.command, process_simpa_message
+            #             ),
+            #         ],
         },
         fallbacks=[],
         allow_reentry=True,

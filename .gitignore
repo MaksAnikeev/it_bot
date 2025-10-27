@@ -159,5 +159,6 @@ telegram_code/text_filters.py
 telegram_code/utils.py
 media
 db2.json
-#*.json
+*.json
 chat.txt
+mock_simpa.py

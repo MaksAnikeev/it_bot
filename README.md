@@ -260,3 +260,12 @@ docker cp django_backend:/app/db_start.json /mnt/d/Программирован�
 ~~~pycon
 docker exec -it django_backend python manage.py loaddata /app/db_start.json
 ~~~
+Если возникает ошибка при вставлении сдампленной БД в существующую (например, уже существует объект с id), 
+то перед вставкой очистим предыдущую БД
+~~~pycon
+docker exec -it django_backend python manage.py flush
+~~~
+а потом заново проведем загрузку
+~~~pycon
+docker exec -it django_backend python manage.py loaddata /app/db_start.json
+~~~
