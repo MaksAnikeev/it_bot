@@ -53,8 +53,17 @@ services:
       pgdb:
         condition: service_healthy
     ports:
-      - "8081:8080"
+      - "8080:8080"
     container_name: django_backend
+    restart: unless-stopped
+
+  yookassa_webhook:
+    build: .
+    command: python /app/telegram_code/yookassa_webhook.py
+    env_file: .env
+    volumes:
+      - .:/app
+    container_name: yookassa_webhook
     restart: unless-stopped
 
   nginx:
@@ -64,11 +73,14 @@ services:
     volumes:
       - ./hosts/get_course_bot_nginx.conf:/etc/nginx/conf.d/default.conf
       - collected_static:/static_bot/collected_static
+#      - ./nginx/certs:/etc/nginx/certs   # Сертификат для запуска юкассы на сервере
 #      - /opt/getcourse/media:/app/media  # Монтируем папку с сервера
       - /mnt/d/Программирование/Devman/it_bot/media:/app/media  # Монтируем локальную папку для локала и запуска в контейнерах с локала
     depends_on:
       backend:
-        condition: service_started  # Изменено с service_healthy на service_started
+        condition: service_started
+      yookassa_webhook:
+        condition: service_started
     container_name: nginx
     restart: unless-stopped
 
@@ -82,15 +94,11 @@ services:
       - PAYMENT_UKASSA_TOKEN=${PAYMENT_UKASSA_TOKEN}
     volumes:
       - .:/app
-    dns:
-      - 8.8.8.8
-      - 8.8.4.4
-    depends_on:
-      nginx:
-        condition: service_started
-      backend:
-        condition: service_started
     container_name: it_bot-bot
+    depends_on:
+      - yookassa_webhook
+      - nginx
+      - backend
     restart: unless-stopped
 
   simpa_bot:

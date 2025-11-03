@@ -26,7 +26,7 @@ from text_filters import (ValidLessonFilter, ValidPracticeFilter,
                           ValidTopicFilter, ValidVideoFilter)
 from utils import (call_api_get, call_api_post, clean_html,
                    delete_previous_messages, download_youtube_video,
-                   validate_phone_number)
+                   validate_phone_number, create_yookassa_payment)
 
 class States(Enum):
     MAIN_MENU = auto()
@@ -297,18 +297,28 @@ def start(update: Update, context: CallbackContext) -> States:
     """
     Старт бота: проверяет пользователя в БД, приветствует его или регистрирует нового.
     """
-    chat_id = update.message.chat_id
+    query = update.callback_query
+    message = query.message if query else update.message
+
+    chat_id = message.chat_id
+    telegram_id = message.from_user.id
+
     # Удаляем предыдущие сообщения
     delete_previous_messages(context, chat_id)
 
+    # Инициализируем список
     if 'prev_message_ids' not in context.user_data:
         context.user_data['prev_message_ids'] = []
-    context.user_data['prev_message_ids'].append(update.message.message_id)
 
-    is_callback = bool(update.callback_query)
+    # Безопасно добавляем message_id
+    if message:
+        context.user_data['prev_message_ids'].append(message.message_id)
+
+    # Обработка callback_query
+    is_callback = bool(query)
     if is_callback:
-        update.callback_query.answer()
-        update.callback_query.delete_message()
+        query.answer()
+        query.delete_message()  # ← Удаляем старое сообщение
 
     telegram_id = get_telegram_id(update, context)
     context.user_data["telegram_id"] = telegram_id
@@ -1087,11 +1097,16 @@ def show_test_result(chat_id: int, context: CallbackContext) -> States:
 
 def start_payment(update: Update, context: CallbackContext) -> States:
     """
-    Старт оплаты через BotFather и регистрация при в проекте при ее отсутствии
+    Старт оплаты через BotFather и регистрация в проекте при ее отсутствии
     """
-    chat_id = update.message.chat_id
-    # Удаляем сообщение пользователя с выбором
-    context.bot.delete_message(chat_id=chat_id, message_id=update.message.message_id)
+    query = update.callback_query
+    if query:
+        chat_id = query.message.chat_id
+        update.callback_query.delete_message()
+    else:
+        chat_id = update.message.chat_id
+        context.bot.delete_message(chat_id=chat_id, message_id=update.message.message_id)
+
     # Удаляем предыдущие сообщения
     delete_previous_messages(context, chat_id)
 
@@ -1166,6 +1181,7 @@ def get_tariff_info(update: Update, context: CallbackContext) -> States:
         """).replace("  ", "")
 
         keyboard = [["🔙 Назад", "💵 Оплатить"],
+                    ["🧾 Прислать чек об оплате"],
                     ["📖 Главное меню"]]
         markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
 
@@ -1181,152 +1197,53 @@ def get_tariff_info(update: Update, context: CallbackContext) -> States:
 
 
 def send_payment(update, context):
-    """Отправляет пользователю счёт для оплаты тарифа."""
-    message_id = update.message.message_id
-    context.user_data['prev_message_ids'].append(message_id)
-    logger.info("send_payment called")
     chat_id = update.effective_chat.id
-    # Проверяем наличие данных в context.user_data
-    try:
-        tariff_title = context.user_data['tariff_title']
-        tariff_price = int(context.user_data['tariff_price'])  # Преобразуем в int для надёжности
-        user_id = context.user_data['user_id']
-        logger.info(f"Tariff: {tariff_title}, Price: {tariff_price}, User: {user_id}")
-    except (KeyError, ValueError):
-        error_message = context.bot.send_message(chat_id=chat_id, text="Ошибка: Не выбран тариф или данные некорректны.")
-        context.user_data['prev_message_ids'].append(error_message.message_id)
-        logger.error("Invalid tariff data")
+    user_id = context.user_data.get('user_id')
+    context.bot.delete_message(chat_id=chat_id, message_id=update.message.message_id)
+
+    # Получаем user_id из БД, если нет
+    if not user_id:
+        response = call_api_get(f'/bot/user/by_telegram/{chat_id}/')
+        if response.ok:
+            user_id = response.json().get('id')
+            context.user_data['user_id'] = user_id
+        else:
+            context.bot.send_message(chat_id, "Ошибка: пользователь не найден.")
+            return States.MAIN_MENU
+
+    tariff_title = context.user_data['tariff_title']
+    tariff_price = context.user_data['tariff_price']
+
+    # ← ВЫЗЫВАЕМ ТВОЮ ФУНКЦИЮ
+    payment_url = create_yookassa_payment(tariff_price, chat_id, user_id, tariff_title)
+
+    if not payment_url:
+        context.bot.send_message(chat_id, "Ошибка создания платежа.")
         return States.MAIN_MENU
 
-    # Проверяем, что цена положительная
-    if tariff_price <= 0:
-        error_price = context.bot.send_message(chat_id=chat_id, text="Ошибка: Цена тарифа должна быть положительной.")
-        context.user_data['prev_message_ids'].append(error_price.message_id)
-        logger.error("Non-positive price")
-        return States.MAIN_MENU
-
-    # Минимальный payload
-    payload = {
-        'u': user_id,
-        'a': tariff_price
-    }
-
-    payload_str = json.dumps(payload)
-    logger.info(f"Payload: {payload_str}")
-    context.user_data['last_payload'] = payload_str
-
-    title = f"Оплата тарифа {tariff_title[:20]}"  # Ограничиваем до 32 символов
-    description = f"Стоимость заказа - {tariff_price} руб"
-    currency = "RUB"
-    prices = [LabeledPrice("🖌 Тариф", tariff_price * 100)]
-
-    try:
-        invoice = context.bot.send_invoice(
-            chat_id=chat_id,
-            title=title,
-            description=description,
-            payload=payload_str,
-            provider_token=provider_ukassa_token,
-            currency=currency,
-            prices=prices
-        )
-        if 'prev_message_ids' not in context.user_data:
-            context.user_data['prev_message_ids'] = []
-        context.user_data['prev_message_ids'].append(invoice.message_id)
-        logger.info("Invoice sent successfully")
-
-        # Добавляем кнопку "💵 Оплатить" после инвойса т.к. юкасса не работает
-        keyboard = [[InlineKeyboardButton("💵 Оплатить", callback_data="process_payment")],
-                    [InlineKeyboardButton("🧾 Отправить чек администратору", callback_data="send_invoice")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        message_id = context.bot.send_message(chat_id=chat_id, text="Нажмите кнопку для завершения оплаты:",
-                                 reply_markup=reply_markup).message_id
-        context.user_data['prev_message_ids'].append(message_id)
-
-    except Exception as e:
-        error_invoice = context.bot.send_message(chat_id=chat_id, text=f"Ошибка при создании счёта: {str(e)}")
-        context.user_data['prev_message_ids'].append(error_invoice.message_id)
-        logger.error(f"Invoice creation failed: {str(e)}")
-        return States.MAIN_MENU
-
+    keyboard = [
+        [InlineKeyboardButton(f"Оплатить {tariff_price} ₽", url=payment_url)],
+        [InlineKeyboardButton("Назад", callback_data="back_to_tariff")]
+    ]
+    message_id = context.bot.send_message(
+        chat_id=chat_id,
+        text=f"Оплата *{tariff_title}* — {tariff_price} ₽",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode='Markdown'
+    ).message_id
+    context.user_data['prev_message_ids'].append(message_id)
     return States.PAYMENT
 
 
-def precheckout_callback(update: Update, context: CallbackContext) -> None:
-    logger.info("precheckout_callback called")
-    query = update.pre_checkout_query
-    logger.info(f"PreCheckoutQuery payload: {query.invoice_payload}")
-    try:
-        payload = json.loads(query.invoice_payload)
-        if 'u' not in payload or 'a' not in payload:
-            logger.error("Missing 'u' or 'a' in payload")
-            query.answer(ok=False, error_message="Неверный формат данных.")
-        else:
-            logger.info("Payload valid, answering OK")
-            query.answer(ok=True)
-    except json.JSONDecodeError as e:
-        logger.error(f"JSON decode error: {e}")
-        query.answer(ok=False, error_message="Ошибка в данных оплаты.")
-
-
-def process_payment(update: Update, context: CallbackContext) -> int:
-    logger.info("process_payment called")
+def main_menu_callback(update: Update, context: CallbackContext):
     query = update.callback_query
     query.answer()
-    return successful_payment(update, context)
 
+    # Убираем кнопки
+    query.edit_message_reply_markup(reply_markup=None)
 
-def successful_payment(update, context):
-    """Обрабатывает успешную оплату."""
-    logger.info("successful_payment called")
-    chat_id = update.effective_chat.id if update.message else update.callback_query.message.chat_id
-
-    # Используем payload из context.user_data
-    payload = json.loads(context.user_data['last_payload'])
-    logger.info(f"Payment payload: {payload}")
-
-    today = datetime.now().date()
-    one_month_later = today + timedelta(days=30)
-    tariff_title = context.user_data['tariff_title']
-    full_payload = {
-        'amount': payload['a'],
-        'user': payload['u'],
-        'access_date_start': str(today),
-        'access_date_finish': str(one_month_later),
-        'tariff': tariff_title,
-        'status': "completed",
-        'service_description': f"Оплата тарифа {tariff_title}"
-    }
-    logger.info(f"Full payload for API: {full_payload}")
-    try:
-        response = call_api_post('/bot/payment/add/', full_payload)
-        logger.info(f"API response: {response.status_code}, {response.text}")
-        if response.ok:
-            payload_content = {
-                'user': payload['u'],
-                'tariff': tariff_title,
-            }
-            response_content = call_api_post('/bot/start_content/add/', payload_content)
-            response_content.raise_for_status()
-
-            menu_msg = 'Оплата успешно произведена, можете приступать к прохождению курса'
-            keyboard = [["📖 Главное меню"]]
-            markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
-
-            if 'prev_message_ids' not in context.user_data:
-                context.user_data['prev_message_ids'] = []
-
-            is_callback = bool(update.callback_query)
-            finish_message_id = send_message_bot(context, update, menu_msg, markup, is_callback)
-            context.user_data['prev_message_ids'].append(finish_message_id)
-            return States.MAIN_MENU
-        else:
-            raise requests.RequestException(f"API вернул ошибку: {response.status_code} - {response.text}")
-
-    except requests.RequestException as e:
-        logger.error(f"API request failed: {str(e)}")
-        handle_api_error(update, context, e, chat_id)
-        return States.ADMIN
+    start(update, context)
+    return States.TOPICS_MENU
 
 
 def send_invoice(update: Update, context: CallbackContext) -> States:
@@ -2602,17 +2519,14 @@ if __name__ == '__main__':
                            MessageHandler(
                                 Filters.text("💵 Оплатить"), send_payment
                            ),
-                           PreCheckoutQueryHandler(
-                                precheckout_callback
-                           ),
                            MessageHandler(
-                                Filters.successful_payment, successful_payment
+                                Filters.text("🧾 Прислать чек об оплате"), send_invoice
                            ),
                            CallbackQueryHandler(
-                                process_payment, pattern="process_payment"
+                                main_menu_callback, pattern="main_menu"
                            ),
                             CallbackQueryHandler(
-                                send_invoice, pattern="send_invoice"
+                                start_payment, pattern="back_to_tariff"
                             ),
                             MessageHandler(
                                 Filters.text, handle_invalid_symbol
@@ -2857,6 +2771,3 @@ if __name__ == '__main__':
 
     updater.start_polling()
     updater.idle()
-
-
-# PAYMENT_UKASSA_TOKEN='381764678:TEST:55794'
