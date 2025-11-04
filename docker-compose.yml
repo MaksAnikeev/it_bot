@@ -81,6 +81,11 @@ services:
         condition: service_started
       yookassa_webhook:
         condition: service_started
+#      неудачная попытка запуска gpt бота через вебхуки
+#      proba_webhook:
+#        condition: service_started
+#      simpa_webhook:
+#        condition: service_started
     container_name: nginx
     restart: unless-stopped
 
@@ -99,6 +104,9 @@ services:
       - yookassa_webhook
       - nginx
       - backend
+#      неудачная попытка запуска gpt бота через вебхуки
+#      - proba_webhook
+#      - simpa_webhook
     restart: unless-stopped
 
   simpa_bot:
@@ -118,8 +126,34 @@ services:
         condition: service_started
       backend:
         condition: service_started
+#      неудачная попытка запуска gpt бота через вебхуки
+#      simpa_webhook:
+#        condition: service_started
     container_name: simpa-bot
     restart: unless-stopped
+
+#  неудачная попытка запуска gpt бота через вебхуки
+#  proba_webhook:
+#    build: .
+#    command: python /app/telegram_code/proba_webhook.py
+#    env_file: .env
+#    volumes:
+#      - .:/app
+#    ports:
+#      - "5000:5000"
+#    container_name: proba_webhook
+#    restart: unless-stopped
+#
+#  simpa_webhook:
+#    build: .
+#    command: python /app/telegram_code/simpa_webhook.py
+#    env_file: .env
+#    volumes:
+#      - .:/app
+#    ports:
+#      - "5001:5001"
+#    container_name: simpa_webhook
+#    restart: unless-stopped
 
 volumes:
   data_db: # для хранения бд в контейнере для локала и запуска в контейнерах с локала

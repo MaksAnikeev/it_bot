@@ -411,7 +411,6 @@ def get_topic_info(update: Update, context: CallbackContext) -> States:
         keyboard = [["📖 Главное меню", "🗂 Темы уроков"]]
         markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
 
-
         if topic_data['picture']:
             logger.info(f"Fetching picture: {topic_data['picture']}")
             try:
@@ -1214,7 +1213,6 @@ def send_payment(update, context):
     tariff_title = context.user_data['tariff_title']
     tariff_price = context.user_data['tariff_price']
 
-    # ← ВЫЗЫВАЕМ ТВОЮ ФУНКЦИЮ
     payment_url = create_yookassa_payment(tariff_price, chat_id, user_id, tariff_title)
 
     if not payment_url:
@@ -2253,24 +2251,23 @@ def user_done_progress(update: Update, context: CallbackContext) -> States:
 #     context.user_data['prev_message_ids'].append(message_id)
 #     context.user_data['awaiting_simpa_message'] = True
 #     return States.AWAITING_SIMPA_MESSAGE
-
-
+#
+#
 # def process_simpa_message(update: Update, context: CallbackContext) -> States:
 #     """Обрабатывает введённое пользователем сообщение и отправляет его gpt боту."""
 #     chat_id = update.effective_chat.id
 #     user_message = update.message.text
-#     context.user_data.pop('awaiting_friend_message', None)
-#
-#     # gpt_bot = Bot(token=gpt_bot_token)
 #
 #     try:
 #         # Отправляем сообщение gpt боту с идентификатором "getcourse" и оригинальным chat_id
-#         full_message = f"getcourse {user_message} [chat_id:{chat_id}]"
-#         response = context.bot.send_message(
-#             chat_id=group_chat_id,
-#             text=full_message
-#         )
+#         full_message = f"getcourse {user_message}"
 #         print(11111111, full_message)
+#
+#         requests.post("http://nginx/simpa/webhook", json={
+#             "chat_id": chat_id,
+#             "text": full_message
+#         })
+#
 #         menu_msg = "Сообщение отправлено симпа боту. Ожидайте ответа!"
 #
 #     except Exception as e:
@@ -2295,9 +2292,6 @@ if __name__ == '__main__':
 
     telegram_bot_token = env.str("TG_BOT_TOKEN")
     provider_ukassa_token = env.str("PAYMENT_UKASSA_TOKEN")
-    # gpt_bot_chat_id = env.str("GPT_BOT_CHAT_ID")
-    # gpt_bot_token = env.str("GPT_BOT_TOKEN")
-    # group_chat_id = env.str("GROUP_CHAT_ID")
 
     # Настройка Request с увеличенными таймаутами
     request = Request(connect_timeout=10, read_timeout=30)  # 10 сек на соединение, 30 сек на чтение
@@ -2735,14 +2729,14 @@ if __name__ == '__main__':
                             Filters.text, not_send_document
                         ),
                     ],
-            # States.AWAITING_SIMPA_MESSAGE: [
-            #             MessageHandler(
-            #                 Filters.text("📖 Главное меню"), start
-            #             ),
-            #             MessageHandler(
-            #                 Filters.text & ~Filters.command, process_simpa_message
-            #             ),
-            #         ],
+        #     States.AWAITING_SIMPA_MESSAGE: [
+        #                 MessageHandler(
+        #                     Filters.text("📖 Главное меню"), start
+        #                 ),
+        #                 MessageHandler(
+        #                     Filters.text & ~Filters.command, process_simpa_message
+        #                 ),
+        #             ],
         },
         fallbacks=[],
         allow_reentry=True,
